@@ -1,0 +1,9 @@
+ALTER TABLE public.matches
+  ADD COLUMN IF NOT EXISTS participant_a_name TEXT,
+  ADD COLUMN IF NOT EXISTS participant_b_name TEXT,
+  ADD COLUMN IF NOT EXISTS round INTEGER DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS status TEXT,
+  ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP;
+
+ALTER TABLE public.matches
+  ALTER COLUMN event_sport_id DROP NOT NULL;

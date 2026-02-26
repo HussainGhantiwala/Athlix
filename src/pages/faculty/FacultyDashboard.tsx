@@ -1,0 +1,441 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { StatsCard } from '@/components/dashboard/StatsCard';
+import { LiveMatchCard } from '@/components/dashboard/LiveMatchCard';
+import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Match, Team } from '@/types/database';
+import {
+  Calendar,
+  Users,
+  Target,
+  ClipboardList,
+  CheckCircle,
+  Clock,
+  DollarSign,
+  Trophy,
+  AlertTriangle,
+} from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { format } from 'date-fns';
+import { toast } from 'sonner';
+import { getTeamScores } from '@/lib/match-scoring';
+
+interface FacultyStats {
+  assignedEvents: number;
+  pendingTeams: number;
+  provisionalMatches: number;
+  pendingBudgets: number;
+  liveMatches: number;
+  totalMatches: number;
+}
+
+export default function FacultyDashboard() {
+  const { profile, user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<FacultyStats>({
+    assignedEvents: 0,
+    pendingTeams: 0,
+    provisionalMatches: 0,
+    pendingBudgets: 0,
+    liveMatches: 0,
+    totalMatches: 0,
+  });
+  const [pendingTeams, setPendingTeams] = useState<Team[]>([]);
+  const [provisionalMatches, setProvisionalMatches] = useState<Match[]>([]);
+  const [liveMatches, setLiveMatches] = useState<Match[]>([]);
+
+  useEffect(() => {
+    fetchDashboardData();
+    
+    // Subscribe to live updates
+    const channel = supabase
+      .channel('faculty-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
+        fetchLiveMatches();
+        fetchProvisionalMatches();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+        fetchPendingTeams();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchStats(),
+      fetchPendingTeams(),
+      fetchProvisionalMatches(),
+      fetchLiveMatches(),
+    ]);
+    setLoading(false);
+  };
+
+  const fetchStats = async () => {
+    const [assignmentsRes, teamsRes, matchesRes, budgetsRes] = await Promise.all([
+      supabase.from('coordinator_assignments').select('id', { count: 'exact' }).eq('user_id', user?.id || ''),
+      supabase.from('teams').select('id, status', { count: 'exact' }).eq('status', 'pending_approval'),
+      supabase.from('matches').select('id, status', { count: 'exact' }),
+      supabase.from('budgets').select('id', { count: 'exact' }).eq('submitted_by', user?.id || ''),
+    ]);
+
+    const provisionalCount = matchesRes.data?.filter(m => m.status === 'completed_provisional').length || 0;
+    const liveCount = matchesRes.data?.filter(m => m.status === 'live').length || 0;
+
+    setStats({
+      assignedEvents: assignmentsRes.count || 0,
+      pendingTeams: teamsRes.count || 0,
+      provisionalMatches: provisionalCount,
+      pendingBudgets: budgetsRes.count || 0,
+      liveMatches: liveCount,
+      totalMatches: matchesRes.count || 0,
+    });
+  };
+
+  const fetchPendingTeams = async () => {
+    const { data } = await supabase
+      .from('teams')
+      .select(`
+        *,
+        university:universities(name, short_name),
+        event_sport:event_sports(
+          sport_category:sports_categories(name, icon),
+          event:events(name)
+        )
+      `)
+      .eq('status', 'pending_approval')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    setPendingTeams((data as unknown as Team[]) || []);
+  };
+
+  const fetchProvisionalMatches = async () => {
+    const { data } = await supabase
+      .from('matches')
+      .select(`
+        *,
+        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+        venue:venues(name),
+        event_sport:event_sports(sport_category:sports_categories(name, icon)),
+        scores(*)
+      `)
+      .eq('status', 'completed_provisional')
+      .order('completed_at', { ascending: false })
+      .limit(5);
+
+    setProvisionalMatches((data as unknown as Match[]) || []);
+  };
+
+  const fetchLiveMatches = async () => {
+    const { data } = await supabase
+      .from('matches')
+      .select(`
+        *,
+        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+        venue:venues(name),
+        event_sport:event_sports(sport_category:sports_categories(name, icon)),
+        scores(*)
+      `)
+      .eq('status', 'live')
+      .order('started_at', { ascending: false })
+      .limit(4);
+
+    setLiveMatches((data as unknown as Match[]) || []);
+  };
+
+  const handleApproveTeam = async (teamId: string) => {
+    const { error } = await supabase
+      .from('teams')
+      .update({
+        status: 'approved',
+        approved_by: user?.id,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', teamId);
+
+    if (error) {
+      toast.error('Failed to approve team');
+    } else {
+      toast.success('Team approved!');
+      fetchPendingTeams();
+      fetchStats();
+    }
+  };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6 animate-fade-in">
+        {/* Welcome Section */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-2xl lg:text-3xl font-display font-bold">
+              {getGreeting()}, {profile?.full_name?.split(' ')[0] || 'Faculty'}! 👋
+            </h1>
+            <p className="text-muted-foreground">
+              Faculty Coordinator Dashboard — Manage events, teams, and finalize scores
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" asChild>
+              <Link to="/faculty/budgets/new">
+                <DollarSign className="mr-2 h-4 w-4" />
+                Submit Budget
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/faculty/matches">
+                <Target className="mr-2 h-4 w-4" />
+                Manage Matches
+              </Link>
+            </Button>
+          </div>
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {loading ? (
+            [...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-32 rounded-xl" />
+            ))
+          ) : (
+            <>
+              <StatsCard
+                title="Live Matches"
+                value={stats.liveMatches}
+                icon={Target}
+                description="Happening now"
+              />
+              <StatsCard
+                title="Pending Finalization"
+                value={stats.provisionalMatches}
+                icon={Clock}
+                description="Awaiting your review"
+              />
+              <StatsCard
+                title="Pending Teams"
+                value={stats.pendingTeams}
+                icon={Users}
+                description="Awaiting approval"
+              />
+              <StatsCard
+                title="Assigned Events"
+                value={stats.assignedEvents}
+                icon={Calendar}
+              />
+            </>
+          )}
+        </div>
+
+        {/* Live Matches */}
+        {liveMatches.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-status-live rounded-full animate-pulse" />
+              <h2 className="text-xl font-display font-bold">Live Matches</h2>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {liveMatches.map((match) => (
+                <LiveMatchCard key={match.id} match={match} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* Matches Pending Finalization */}
+          <div className="dashboard-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-display font-bold flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-status-provisional" />
+                Pending Finalization
+              </h2>
+              <Link to="/faculty/matches?status=completed_provisional" className="text-sm text-accent hover:underline">
+                View all →
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
+              </div>
+            ) : provisionalMatches.length > 0 ? (
+              <div className="space-y-3">
+                {provisionalMatches.map(match => {
+                  const { teamAScore: scoreA, teamBScore: scoreB } = getTeamScores(match);
+
+                  return (
+                    <div
+                      key={match.id}
+                      className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">{match.event_sport?.sport_category?.icon}</span>
+                        <div>
+                          <p className="font-medium text-sm">
+                            {match.team_a?.name} vs {match.team_b?.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Score: {scoreA} - {scoreB}
+                          </p>
+                        </div>
+                      </div>
+                      <Button size="sm" asChild>
+                        <Link to={`/faculty/matches/${match.id}/finalize`}>
+                          Finalize
+                        </Link>
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <CheckCircle className="h-12 w-12 text-status-finalized mx-auto mb-3" />
+                <p className="text-muted-foreground">No matches pending finalization</p>
+              </div>
+            )}
+          </div>
+
+          {/* Pending Team Approvals */}
+          <div className="dashboard-card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-display font-bold flex items-center gap-2">
+                <Users className="h-5 w-5 text-accent" />
+                Team Approvals
+              </h2>
+              <Link to="/faculty/teams" className="text-sm text-accent hover:underline">
+                View all →
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
+              </div>
+            ) : pendingTeams.length > 0 ? (
+              <div className="space-y-3">
+                {pendingTeams.map(team => (
+                  <div
+                    key={team.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                        <Users className="h-5 w-5 text-accent" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">{team.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {team.university?.short_name}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        asChild
+                      >
+                        <Link to={`/faculty/teams/${team.id}`}>
+                          Review
+                        </Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleApproveTeam(team.id)}
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <CheckCircle className="h-12 w-12 text-status-finalized mx-auto mb-3" />
+                <p className="text-muted-foreground">No teams pending approval</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="dashboard-card p-6">
+          <h2 className="text-lg font-display font-bold mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Link
+              to="/faculty/events"
+              className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+            >
+              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                <Calendar className="h-5 w-5 text-accent" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Events</p>
+                <p className="text-xs text-muted-foreground">Configure sports</p>
+              </div>
+            </Link>
+            <Link
+              to="/faculty/submissions"
+              className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+            >
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <ClipboardList className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Submissions</p>
+                <p className="text-xs text-muted-foreground">Review requests</p>
+              </div>
+            </Link>
+            <Link
+              to="/faculty/teams"
+              className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+            >
+              <div className="w-10 h-10 rounded-lg bg-status-live/10 flex items-center justify-center">
+                <Users className="h-5 w-5 text-status-live" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Teams</p>
+                <p className="text-xs text-muted-foreground">Review & approve</p>
+              </div>
+            </Link>
+            <Link
+              to="/faculty/matches"
+              className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+            >
+              <div className="w-10 h-10 rounded-lg bg-status-finalized/10 flex items-center justify-center">
+                <Target className="h-5 w-5 text-status-finalized" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Matches</p>
+                <p className="text-xs text-muted-foreground">Finalize scores</p>
+              </div>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
