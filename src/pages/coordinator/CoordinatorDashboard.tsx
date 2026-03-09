@@ -4,9 +4,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { StatsCard } from '@/components/dashboard/StatsCard';
+import { LiveMatchCard } from '@/components/dashboard/LiveMatchCard';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Match } from '@/types/database';
+import { Match, Registration } from '@/types/database';
 import {
   Target,
   Users,
@@ -20,7 +21,6 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { getTeamScores } from '@/lib/match-scoring';
 
 interface CoordinatorStats {
   liveMatches: number;
@@ -29,19 +29,8 @@ interface CoordinatorStats {
   teamsManaged: number;
 }
 
-interface PendingRegistration {
-  id: string;
-  user_id: string;
-  status: 'pending' | 'approved' | 'rejected';
-  created_at: string;
-  team_name: string | null;
-  event?: { name: string } | null;
-  sport?: { name: string; icon: string | null } | null;
-  profile?: { full_name: string; email: string } | null;
-}
-
 export default function CoordinatorDashboard() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<CoordinatorStats>({
     liveMatches: 0,
@@ -51,24 +40,23 @@ export default function CoordinatorDashboard() {
   });
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [scheduledMatches, setScheduledMatches] = useState<Match[]>([]);
-  const [pendingRegistrations, setPendingRegistrations] = useState<PendingRegistration[]>([]);
+  const [pendingRegistrations, setPendingRegistrations] = useState<Registration[]>([]);
 
   useEffect(() => {
-    void (async () => {
-      await fetchDashboardData();
-    })();
-
+    fetchDashboardData();
+    
+    // Subscribe to live updates
     const channel = supabase
       .channel('coordinator-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        void fetchLiveMatches();
-        void fetchScheduledMatches();
+        fetchLiveMatches();
+        fetchScheduledMatches();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => {
-        void fetchLiveMatches();
+        fetchLiveMatches();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registration_submissions' }, () => {
-        void fetchPendingRegistrations();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => {
+        fetchPendingRegistrations();
       })
       .subscribe();
 
@@ -89,37 +77,34 @@ export default function CoordinatorDashboard() {
   };
 
   const fetchStats = async () => {
-    const [matchesRes, registrationsRes, teamNamesRes] = await Promise.all([
+    const [matchesRes, registrationsRes, teamsRes] = await Promise.all([
       supabase.from('matches').select('id, status', { count: 'exact' }),
-      supabase
-        .from('registration_submissions')
-        .select('id', { count: 'exact' }),
-      supabase
-        .from('registration_submissions')
-        .select('team_name')
-        .not('team_name', 'is', null),
+      supabase.from('registrations').select('id, status', { count: 'exact' }).eq('status', 'pending'),
+      supabase.from('teams').select('id', { count: 'exact' }),
     ]);
 
-    const liveCount = matchesRes.data?.filter((m) => m.status === 'live').length || 0;
-    const scheduledCount = matchesRes.data?.filter((m) => m.status === 'scheduled').length || 0;
-    const distinctTeamNames = new Set<string>();
-    (teamNamesRes.data || []).forEach((row) => {
-      const name = row.team_name?.trim();
-      if (name) distinctTeamNames.add(name);
-    });
+    const liveCount = matchesRes.data?.filter(m => m.status === 'live').length || 0;
+    const scheduledCount = matchesRes.data?.filter(m => m.status === 'scheduled').length || 0;
 
     setStats({
       liveMatches: liveCount,
       scheduledMatches: scheduledCount,
       pendingRegistrations: registrationsRes.count || 0,
-      teamsManaged: distinctTeamNames.size,
+      teamsManaged: teamsRes.count || 0,
     });
   };
 
   const fetchLiveMatches = async () => {
     const { data } = await supabase
       .from('matches')
-      .select('*')
+      .select(`
+        *,
+        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+        venue:venues(name),
+        event_sport:event_sports(sport_category:sports_categories(name, icon)),
+        scores(*)
+      `)
       .eq('status', 'live')
       .order('started_at', { ascending: false })
       .limit(6);
@@ -130,8 +115,16 @@ export default function CoordinatorDashboard() {
   const fetchScheduledMatches = async () => {
     const { data } = await supabase
       .from('matches')
-      .select('*')
+      .select(`
+        *,
+        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+        venue:venues(name),
+        event_sport:event_sports(sport_category:sports_categories(name, icon)),
+        scores(*)
+      `)
       .eq('status', 'scheduled')
+      .gte('scheduled_at', new Date().toISOString())
       .order('scheduled_at')
       .limit(5);
 
@@ -140,37 +133,20 @@ export default function CoordinatorDashboard() {
 
   const fetchPendingRegistrations = async () => {
     const { data } = await supabase
-      .from('registration_submissions')
+      .from('registrations')
       .select(`
-        id,
-        user_id,
-        status,
-        created_at,
-        team_name,
-        event:events(name),
-        sport:sports_categories(name, icon)
+        *,
+        profile:profiles!registrations_user_id_fkey(full_name, email),
+        event_sport:event_sports(
+          sport_category:sports_categories(name, icon),
+          event:events(name)
+        )
       `)
+      .eq('status', 'pending')
       .order('created_at', { ascending: false })
       .limit(5);
 
-    const pending = (data as unknown as PendingRegistration[]) || [];
-    if (!pending.length) {
-      setPendingRegistrations([]);
-      return;
-    }
-
-    const userIds = [...new Set(pending.map((row) => row.user_id).filter(Boolean))];
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, full_name, email')
-      .in('id', userIds);
-
-    const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile]));
-    const withProfiles = pending.map((row) => ({
-      ...row,
-      profile: profileMap.get(row.user_id) || null,
-    }));
-    setPendingRegistrations(withProfiles);
+    setPendingRegistrations((data as unknown as Registration[]) || []);
   };
 
   const handleStartMatch = async (matchId: string) => {
@@ -178,6 +154,9 @@ export default function CoordinatorDashboard() {
       .from('matches')
       .update({
         status: 'live',
+        started_at: new Date().toISOString(),
+        current_editor_id: user?.id,
+        editor_locked_at: new Date().toISOString(),
       })
       .eq('id', matchId);
 
@@ -185,9 +164,28 @@ export default function CoordinatorDashboard() {
       toast.error('Failed to start match');
     } else {
       toast.success('Match started!');
-      void fetchScheduledMatches();
-      void fetchLiveMatches();
-      void fetchStats();
+      fetchScheduledMatches();
+      fetchLiveMatches();
+      fetchStats();
+    }
+  };
+
+  const handleApproveRegistration = async (registrationId: string) => {
+    const { error } = await supabase
+      .from('registrations')
+      .update({
+        status: 'approved',
+        reviewed_by: user?.id,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', registrationId);
+
+    if (error) {
+      toast.error('Failed to approve registration');
+    } else {
+      toast.success('Registration approved!');
+      fetchPendingRegistrations();
+      fetchStats();
     }
   };
 
@@ -201,16 +199,23 @@ export default function CoordinatorDashboard() {
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
+        {/* Welcome Section */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-2xl lg:text-3xl font-display font-bold">
-              {getGreeting()}, {profile?.full_name?.split(' ')[0] || 'Coordinator'}!
+              {getGreeting()}, {profile?.full_name?.split(' ')[0] || 'Coordinator'}! 👋
             </h1>
             <p className="text-muted-foreground">
-              Student Coordinator Dashboard - Manage live scores, submissions, and teams
+              Student Coordinator Dashboard — Manage live scores, registrations, and teams
             </p>
           </div>
           <div className="flex gap-2">
+            <Button asChild>
+              <Link to="/coordinator/score-control">
+                <Edit2 className="mr-2 h-4 w-4" />
+                Score Control
+              </Link>
+            </Button>
             <Button variant="outline" asChild>
               <Link to="/coordinator/teams/new">
                 <Users className="mr-2 h-4 w-4" />
@@ -220,6 +225,7 @@ export default function CoordinatorDashboard() {
           </div>
         </div>
 
+        {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {loading ? (
             [...Array(4)].map((_, i) => (
@@ -227,28 +233,43 @@ export default function CoordinatorDashboard() {
             ))
           ) : (
             <>
-              <StatsCard title="Live Matches" value={stats.liveMatches} icon={Target} description="Update scores now" />
-              <StatsCard title="Scheduled" value={stats.scheduledMatches} icon={Clock} description="Ready to start" />
               <StatsCard
-                title="Registrations"
+                title="Live Matches"
+                value={stats.liveMatches}
+                icon={Target}
+                description="Update scores now"
+              />
+              <StatsCard
+                title="Scheduled"
+                value={stats.scheduledMatches}
+                icon={Clock}
+                description="Ready to start"
+              />
+              <StatsCard
+                title="Pending Registrations"
                 value={stats.pendingRegistrations}
                 icon={ClipboardList}
-                description="Recent submissions"
+                description="Awaiting review"
               />
-              <StatsCard title="Teams" value={stats.teamsManaged} icon={Users} />
+              <StatsCard
+                title="Teams"
+                value={stats.teamsManaged}
+                icon={Users}
+              />
             </>
           )}
         </div>
 
+        {/* Live Matches - Priority Section */}
         {liveMatches.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 bg-status-live rounded-full animate-pulse" />
-                <h2 className="text-xl font-display font-bold">Live Matches - Update Scores</h2>
+                <h2 className="text-xl font-display font-bold">Live Matches — Update Scores</h2>
               </div>
               <Link to="/coordinator/matches?status=live" className="text-sm text-accent hover:underline">
-                View all
+                View all →
               </Link>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -259,27 +280,27 @@ export default function CoordinatorDashboard() {
                     <span className="text-sm font-medium">{match.event_sport?.sport_category?.name}</span>
                     <StatusBadge status="live" className="ml-auto" />
                   </div>
-
+                  
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-center flex-1">
-                      <p className="font-semibold text-sm">
-                        {match.participant_a_name || match.participant_a?.name || match.team_a?.name}
+                      <p className="font-semibold text-sm">{match.team_a?.name}</p>
+                      <p className="text-2xl font-display font-bold">
+                        {match.scores?.find(s => s.team_id === match.team_a_id)?.score_value ?? 0}
                       </p>
-                      <p className="text-2xl font-display font-bold">{getTeamScores(match).teamAScore}</p>
                     </div>
                     <span className="text-muted-foreground px-2">vs</span>
                     <div className="text-center flex-1">
-                      <p className="font-semibold text-sm">
-                        {match.participant_b_name || match.participant_b?.name || match.team_b?.name}
+                      <p className="font-semibold text-sm">{match.team_b?.name}</p>
+                      <p className="text-2xl font-display font-bold">
+                        {match.scores?.find(s => s.team_id === match.team_b_id)?.score_value ?? 0}
                       </p>
-                      <p className="text-2xl font-display font-bold">{getTeamScores(match).teamBScore}</p>
                     </div>
                   </div>
 
                   <Button className="w-full" asChild>
-                    <Link to={`/coordinator/matches/${match.id}/score`}>
+                    <Link to="/coordinator/score-control">
                       <Edit2 className="mr-2 h-4 w-4" />
-                      Update Score
+                      Open Score Control
                     </Link>
                   </Button>
                 </div>
@@ -289,6 +310,7 @@ export default function CoordinatorDashboard() {
         )}
 
         <div className="grid lg:grid-cols-2 gap-6">
+          {/* Upcoming Matches */}
           <div className="dashboard-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-display font-bold flex items-center gap-2">
@@ -296,7 +318,7 @@ export default function CoordinatorDashboard() {
                 Upcoming Matches
               </h2>
               <Link to="/coordinator/matches" className="text-sm text-accent hover:underline">
-                View all
+                View all →
               </Link>
             </div>
 
@@ -308,7 +330,7 @@ export default function CoordinatorDashboard() {
               </div>
             ) : scheduledMatches.length > 0 ? (
               <div className="space-y-3">
-                {scheduledMatches.map((match) => (
+                {scheduledMatches.map(match => (
                   <div
                     key={match.id}
                     className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
@@ -317,17 +339,17 @@ export default function CoordinatorDashboard() {
                       <span className="text-xl">{match.event_sport?.sport_category?.icon}</span>
                       <div>
                         <p className="font-medium text-sm">
-                          {match.participant_a_name || match.participant_a?.name || match.team_a?.name} vs {match.participant_b_name || match.participant_b?.name || match.team_b?.name}
+                          {match.team_a?.name} vs {match.team_b?.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {format(new Date(match.scheduled_at), 'MMM d, HH:mm')}
-                          {match.event_sport?.event?.start_date
-                            ? ` | Event starts ${match.event_sport.event.start_date}`
-                            : ''}
                         </p>
                       </div>
                     </div>
-                    <Button size="sm" onClick={() => handleStartMatch(match.id)}>
+                    <Button
+                      size="sm"
+                      onClick={() => handleStartMatch(match.id)}
+                    >
                       <Play className="h-4 w-4 mr-1" />
                       Start
                     </Button>
@@ -342,14 +364,15 @@ export default function CoordinatorDashboard() {
             )}
           </div>
 
+          {/* Pending Registrations */}
           <div className="dashboard-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-display font-bold flex items-center gap-2">
                 <ClipboardList className="h-5 w-5 text-accent" />
-                Recent Registrations
+                Pending Registrations
               </h2>
-              <Link to="/coordinator/submissions" className="text-sm text-accent hover:underline">
-                View all
+              <Link to="/coordinator/registrations" className="text-sm text-accent hover:underline">
+                View all →
               </Link>
             </div>
 
@@ -361,7 +384,7 @@ export default function CoordinatorDashboard() {
               </div>
             ) : pendingRegistrations.length > 0 ? (
               <div className="space-y-3">
-                {pendingRegistrations.map((reg) => (
+                {pendingRegistrations.map(reg => (
                   <div
                     key={reg.id}
                     className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
@@ -373,14 +396,25 @@ export default function CoordinatorDashboard() {
                       <div>
                         <p className="font-medium text-sm">{reg.profile?.full_name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {reg.sport?.name} • {reg.event?.name}
-                          {reg.team_name ? ` • ${reg.team_name}` : ''}
+                          {reg.event_sport?.sport_category?.name} • {reg.event_sport?.event?.name}
                         </p>
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" asChild>
-                        <Link to="/coordinator/submissions">Review</Link>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        asChild
+                      >
+                        <Link to={`/coordinator/registrations/${reg.id}`}>
+                          Review
+                        </Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleApproveRegistration(reg.id)}
+                      >
+                        Approve
                       </Button>
                     </div>
                   </div>
@@ -389,36 +423,49 @@ export default function CoordinatorDashboard() {
             ) : (
               <div className="text-center py-8">
                 <ClipboardList className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-                <p className="text-muted-foreground">No registrations yet</p>
+                <p className="text-muted-foreground">No pending registrations</p>
               </div>
             )}
           </div>
         </div>
 
+        {/* Quick Actions */}
         <div className="dashboard-card p-6">
           <h2 className="text-lg font-display font-bold mb-4">Quick Actions</h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Link
-              to="/coordinator/matches"
-              className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+              to="/coordinator/score-control"
+              className="p-4 rounded-lg bg-status-live/10 hover:bg-status-live/20 transition-colors flex items-center gap-3 border border-status-live/20"
             >
-              <div className="w-10 h-10 rounded-lg bg-status-live/10 flex items-center justify-center">
-                <Target className="h-5 w-5 text-status-live" />
+              <div className="w-10 h-10 rounded-lg bg-status-live/20 flex items-center justify-center">
+                <Edit2 className="h-5 w-5 text-status-live" />
               </div>
               <div>
-                <p className="font-medium text-sm">Matches</p>
-                <p className="text-xs text-muted-foreground">Update scores</p>
+                <p className="font-medium text-sm">Score Control</p>
+                <p className="text-xs text-muted-foreground">Live scoring</p>
               </div>
             </Link>
             <Link
-              to="/coordinator/submissions"
+              to="/coordinator/matches"
+              className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+            >
+              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                <Target className="h-5 w-5 text-accent" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">Matches</p>
+                <p className="text-xs text-muted-foreground">View all</p>
+              </div>
+            </Link>
+            <Link
+              to="/coordinator/registrations"
               className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
             >
               <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
                 <ClipboardList className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <p className="font-medium text-sm">Submissions</p>
+                <p className="font-medium text-sm">Registrations</p>
                 <p className="text-xs text-muted-foreground">Process signups</p>
               </div>
             </Link>
@@ -449,6 +496,7 @@ export default function CoordinatorDashboard() {
           </div>
         </div>
 
+        {/* Important Notice */}
         <div className="bg-status-provisional/10 border border-status-provisional/20 rounded-xl p-4">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-full bg-status-provisional/20 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -457,8 +505,8 @@ export default function CoordinatorDashboard() {
             <div>
               <p className="font-medium text-sm">Important Reminder</p>
               <p className="text-sm text-muted-foreground">
-                You can update live scores and mark matches as completed (provisional), but only faculty can
-                finalize results.
+                You can update live scores and mark matches as completed (provisional), but only Faculty
+                Coordinators can finalize match results. Make sure to complete matches promptly after they end.
               </p>
             </div>
           </div>

@@ -17,11 +17,10 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { CheckCircle, RotateCcw, Shield, Trophy, AlertTriangle } from 'lucide-react';
-import { Match, MatchStatusEnum } from '@/types/database';
-import { determineWinnerId, getTeamScores } from '@/lib/match-scoring';
+import { Match } from '@/types/database';
 
 export default function ScoreFinalization() {
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [provisionalMatches, setProvisionalMatches] = useState<Match[]>([]);
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
@@ -62,21 +61,29 @@ export default function ScoreFinalization() {
   const handleFinalize = async () => {
     if (!selectedMatch) return;
 
-    if (role !== 'faculty') {
-      toast.error('Only faculty can finalize matches');
-      return;
-    }
+    const scoreA = selectedMatch.scores?.find(s => s.team_id === selectedMatch.team_a_id)?.score_value ?? 0;
+    const scoreB = selectedMatch.scores?.find(s => s.team_id === selectedMatch.team_b_id)?.score_value ?? 0;
 
-    const winnerId = determineWinnerId(selectedMatch);
-    const { teamAScore: scoreA, teamBScore: scoreB } = getTeamScores(selectedMatch);
+    // Set winners
+    if (selectedMatch.team_a_id) {
+      await supabase.from('scores')
+        .update({ is_winner: scoreA > scoreB })
+        .eq('match_id', selectedMatch.id)
+        .eq('team_id', selectedMatch.team_a_id);
+    }
+    if (selectedMatch.team_b_id) {
+      await supabase.from('scores')
+        .update({ is_winner: scoreB > scoreA })
+        .eq('match_id', selectedMatch.id)
+        .eq('team_id', selectedMatch.team_b_id);
+    }
 
     const { error } = await supabase
       .from('matches')
       .update({
-        status: MatchStatusEnum.Finalized,
+        status: 'finalized',
         finalized_by: user?.id,
         finalized_at: new Date().toISOString(),
-        winner_id: winnerId,
       })
       .eq('id', selectedMatch.id);
 
@@ -84,20 +91,15 @@ export default function ScoreFinalization() {
       table_name: 'matches',
       record_id: selectedMatch.id,
       action: 'finalize',
-      new_data: { status: MatchStatusEnum.Finalized, scoreA, scoreB, winnerId },
+      new_data: { status: 'finalized', scoreA, scoreB },
       performed_by: user?.id,
     });
 
-    if (error) toast.error('Failed to finalize');
+    if (error) toast.error('Failed to finalize: ' + error.message);
     else { toast.success('Match finalized! Score is now official.'); setIsFinalizeOpen(false); fetchMatches(); }
   };
 
   const handleReopen = async () => {
-    if (role !== 'faculty') {
-      toast.error('Only faculty can reopen matches');
-      return;
-    }
-
     if (!selectedMatch || !reopenReason.trim()) {
       toast.error('Please provide a reason for reopening');
       return;
@@ -114,7 +116,7 @@ export default function ScoreFinalization() {
     const { error } = await supabase
       .from('matches')
       .update({
-        status: MatchStatusEnum.Live,
+        status: 'live',
         finalized_by: null,
         finalized_at: null,
         current_editor_id: null,
@@ -148,9 +150,10 @@ export default function ScoreFinalization() {
         ) : provisionalMatches.length > 0 ? (
           <div className="space-y-4">
             {provisionalMatches.map(match => {
-              const { teamAScore: scoreA, teamBScore: scoreB } = getTeamScores(match);
+              const scoreA = match.scores?.find(s => s.team_id === match.team_a_id)?.score_value ?? 0;
+              const scoreB = match.scores?.find(s => s.team_id === match.team_b_id)?.score_value ?? 0;
               const isProvisional = match.status === 'completed_provisional';
-              const isFinalized = match.status === MatchStatusEnum.Finalized;
+              const isFinalized = match.status === 'finalized';
 
               return (
                 <div key={match.id} className={`dashboard-card p-5 ${isProvisional ? 'border-status-provisional border-2' : ''}`}>
@@ -178,7 +181,7 @@ export default function ScoreFinalization() {
                     <div className="flex items-center gap-3">
                       <StatusBadge status={match.status} />
 
-                      {isProvisional && role === 'faculty' && (
+                      {isProvisional && (
                         <Button onClick={() => { setSelectedMatch(match); setIsFinalizeOpen(true); }}>
                           <CheckCircle className="h-4 w-4 mr-2" />
                           Finalize
@@ -189,18 +192,15 @@ export default function ScoreFinalization() {
                         <div className="flex items-center gap-2">
                           <Shield className="h-4 w-4 text-status-finalized" />
                           <span className="text-xs text-status-finalized font-medium">OFFICIAL</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => { setSelectedMatch(match); setIsReopenOpen(true); }}
+                          >
+                            <RotateCcw className="h-4 w-4 mr-1" />
+                            Reopen
+                          </Button>
                         </div>
-                      )}
-
-                      {isProvisional && role === 'faculty' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => { setSelectedMatch(match); setIsReopenOpen(true); }}
-                        >
-                          <RotateCcw className="h-4 w-4 mr-1" />
-                          Reopen
-                        </Button>
                       )}
                     </div>
                   </div>
@@ -233,14 +233,14 @@ export default function ScoreFinalization() {
                 <div>
                   <p className="font-semibold">{selectedMatch.team_a?.name}</p>
                   <p className="text-3xl font-display font-bold">
-                    {getTeamScores(selectedMatch).teamAScore}
+                    {selectedMatch.scores?.find(s => s.team_id === selectedMatch.team_a_id)?.score_value ?? 0}
                   </p>
                 </div>
                 <span className="text-xl text-muted-foreground">-</span>
                 <div>
                   <p className="font-semibold">{selectedMatch.team_b?.name}</p>
                   <p className="text-3xl font-display font-bold">
-                    {getTeamScores(selectedMatch).teamBScore}
+                    {selectedMatch.scores?.find(s => s.team_id === selectedMatch.team_b_id)?.score_value ?? 0}
                   </p>
                 </div>
               </div>

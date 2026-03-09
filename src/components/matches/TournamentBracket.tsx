@@ -12,6 +12,10 @@ interface TournamentBracketProps {
 }
 
 const getRoundLabel = (round: string): string => {
+  if (round === 'round_of_16') return 'Round of 16';
+  if (round === 'quarterfinal') return 'Quarterfinal';
+  if (round === 'semifinal') return 'Semifinal';
+  if (round === 'final') return 'Final';
   if (round === 'semi') return 'Semifinal';
   if (round === 'final') return 'Final';
   return round.toUpperCase();
@@ -31,7 +35,6 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
         { event: '*', schema: 'public', table: 'matches', filter: `event_sport_id=eq.${eventSportId}` },
         () => fetchBracket()
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => fetchBracket())
       .subscribe();
 
     return () => {
@@ -46,11 +49,10 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
       .select(`
         *,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
-        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
-        scores(*)
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name))
       `)
       .eq('event_sport_id', eventSportId)
-      .eq('phase', 'knockout')
+      .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final', 'semi', 'final'])
       .not('round', 'is', null)
       .order('round_number', { ascending: true })
       .order('match_number', { ascending: true });
@@ -105,8 +107,9 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
               {roundMatches.map((match) => {
                 const { teamAScore, teamBScore } = getTeamScores(match);
                 const isHighlighted = highlightMatchId === match.id;
-                const winnerA = match.winner_id && match.winner_id === match.team_a_id;
-                const winnerB = match.winner_id && match.winner_id === match.team_b_id;
+                const winnerId = match.winner_id || match.winner_team_id;
+                const winnerA = winnerId && winnerId === match.team_a_id;
+                const winnerB = winnerId && winnerId === match.team_b_id;
 
                 return (
                   <div

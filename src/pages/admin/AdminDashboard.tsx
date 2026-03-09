@@ -60,15 +60,6 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-
-    const channel = supabase
-      .channel('admin-dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => fetchStats())
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   const fetchDashboardData = async () => {
@@ -91,9 +82,7 @@ export default function AdminDashboard() {
       supabase.from('teams').select('id', { count: 'exact' }),
       supabase.from('matches').select('id, status', { count: 'exact' }),
       supabase.from('budgets').select('id, status', { count: 'exact' }),
-      supabase
-        .from('registration_submissions')
-        .select('id', { count: 'exact' }),
+      supabase.from('registrations').select('id', { count: 'exact' }),
     ]);
 
     const activeEvents = eventsRes.data?.filter(e => e.status === 'active').length || 0;

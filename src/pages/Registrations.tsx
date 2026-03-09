@@ -5,6 +5,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Registration } from '@/types/database';
 import {
   Select,
   SelectContent,
@@ -13,111 +14,71 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Search, ClipboardList, CheckCircle, XCircle } from 'lucide-react';
+import { Search, ClipboardList, CheckCircle, XCircle, User } from 'lucide-react';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
-interface RegistrationRow {
-  id: string;
-  user_id: string;
-  status: 'pending' | 'approved' | 'rejected';
-  created_at: string;
-  team_name: string | null;
-  event?: { name: string } | null;
-  sport?: { name: string; icon: string | null } | null;
-  team?: { id: string; name: string } | null;
-  profile?: { full_name: string; email: string; avatar_url?: string | null } | null;
-}
-
 export default function Registrations() {
-  const { user, isAdmin, isFaculty, isStudentCoordinator, role } = useAuth();
+  const { user, isAdmin, isFaculty, isStudentCoordinator } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [registrations, setRegistrations] = useState<RegistrationRow[]>([]);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   useEffect(() => {
-    void fetchRegistrations();
-  }, [statusFilter, user?.id, role]);
+    fetchRegistrations();
+  }, [statusFilter]);
 
   const fetchRegistrations = async () => {
     setLoading(true);
     let query = supabase
-      .from('registration_submissions')
+      .from('registrations')
       .select(`
-        id,
-        user_id,
-        status,
-        created_at,
-        team_name,
-        event:events(name),
-        sport:sports_categories(name, icon),
-        team:teams(id, name)
+        *,
+        profile:profiles(full_name, email, avatar_url),
+        event_sport:event_sports(
+          sport_category:sports_categories(name, icon),
+          event:events(name)
+        )
       `)
       .order('created_at', { ascending: false });
 
     if (statusFilter !== 'all') {
       query = query.eq('status', statusFilter as any);
     }
-    if (!isAdmin && !isFaculty && !isStudentCoordinator) {
-      query = query.eq('user_id', user?.id || '');
-    }
 
     const { data, error } = await query;
     if (error) {
       toast.error('Failed to fetch registrations');
-      setLoading(false);
-      return;
+    } else {
+      setRegistrations((data as unknown as Registration[]) || []);
     }
-
-    const rows = (data as unknown as RegistrationRow[]) || [];
-    if (rows.length === 0) {
-      setRegistrations([]);
-      setLoading(false);
-      return;
-    }
-
-    const userIds = [...new Set(rows.map((row) => row.user_id).filter(Boolean))];
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, full_name, email, avatar_url')
-      .in('id', userIds);
-
-    const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile]));
-    setRegistrations(
-      rows.map((row) => ({
-        ...row,
-        profile: profileMap.get(row.user_id) || null,
-      }))
-    );
     setLoading(false);
   };
 
   const handleUpdateStatus = async (registrationId: string, newStatus: 'approved' | 'rejected') => {
     const { error } = await supabase
-      .from('registration_submissions')
+      .from('registrations')
       .update({
         status: newStatus,
         reviewed_by: user?.id,
         reviewed_at: new Date().toISOString(),
-      } as any)
+      })
       .eq('id', registrationId);
 
     if (error) {
       toast.error('Failed to update registration');
     } else {
       toast.success(`Registration ${newStatus}`);
-      void fetchRegistrations();
+      fetchRegistrations();
     }
   };
 
   const filteredRegistrations = registrations.filter((reg) =>
-    (reg.profile?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (reg.profile?.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (reg.sport?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (reg.event?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (reg.team_name || reg.team?.name || '').toLowerCase().includes(searchQuery.toLowerCase())
+    (reg as any).profile?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (reg as any).profile?.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    reg.event_sport?.sport_category?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const canManageRegistrations = isAdmin || isFaculty || isStudentCoordinator;
@@ -125,11 +86,13 @@ export default function Registrations() {
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
+        {/* Header */}
         <div>
           <h1 className="text-2xl lg:text-3xl font-display font-bold">Registrations</h1>
           <p className="text-muted-foreground">Manage participant registrations</p>
         </div>
 
+        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -153,6 +116,7 @@ export default function Registrations() {
           </Select>
         </div>
 
+        {/* Registrations List */}
         {loading ? (
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
@@ -166,34 +130,39 @@ export default function Registrations() {
                 key={registration.id}
                 className="dashboard-card p-4 flex flex-col sm:flex-row sm:items-center gap-4"
               >
+                {/* Participant Info */}
                 <div className="flex items-center gap-3 flex-1">
                   <Avatar className="h-10 w-10">
-                    <AvatarImage src={registration.profile?.avatar_url || undefined} />
-                    <AvatarFallback>{registration.profile?.full_name?.charAt(0) || 'U'}</AvatarFallback>
+                    <AvatarImage src={(registration as any).profile?.avatar_url} />
+                    <AvatarFallback>
+                      {(registration as any).profile?.full_name?.charAt(0) || 'U'}
+                    </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">{registration.profile?.full_name || 'Unknown User'}</p>
-                    <p className="text-sm text-muted-foreground">{registration.profile?.email || '-'}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">{registration.sport?.icon}</span>
-                  <div>
-                    <p className="font-medium">{registration.sport?.name}</p>
-                    <p className="text-sm text-muted-foreground truncate max-w-[220px]">
-                      {registration.event?.name}
-                      {(registration.team_name || registration.team?.name)
-                        ? ` • ${registration.team_name || registration.team?.name}`
-                        : ''}
+                    <p className="font-medium">{(registration as any).profile?.full_name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {(registration as any).profile?.email}
                     </p>
                   </div>
                 </div>
 
+                {/* Sport & Event */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">{registration.event_sport?.sport_category?.icon}</span>
+                  <div>
+                    <p className="font-medium">{registration.event_sport?.sport_category?.name}</p>
+                    <p className="text-sm text-muted-foreground truncate max-w-[200px]">
+                      {registration.event_sport?.event?.name}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Date */}
                 <div className="text-sm text-muted-foreground">
                   {format(new Date(registration.created_at), 'MMM d, yyyy')}
                 </div>
 
+                {/* Status & Actions */}
                 <div className="flex items-center gap-3">
                   <StatusBadge status={registration.status} />
 

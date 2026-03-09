@@ -22,7 +22,6 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { getTeamScores } from '@/lib/match-scoring';
 
 interface FacultyStats {
   assignedEvents: number;
@@ -281,7 +280,8 @@ export default function FacultyDashboard() {
             ) : provisionalMatches.length > 0 ? (
               <div className="space-y-3">
                 {provisionalMatches.map(match => {
-                  const { teamAScore: scoreA, teamBScore: scoreB } = getTeamScores(match);
+                  const scoreA = match.scores?.find(s => s.team_id === match.team_a_id)?.score_value ?? 0;
+                  const scoreB = match.scores?.find(s => s.team_id === match.team_b_id)?.score_value ?? 0;
 
                   return (
                     <div
@@ -398,15 +398,15 @@ export default function FacultyDashboard() {
               </div>
             </Link>
             <Link
-              to="/faculty/submissions"
+              to="/faculty/registrations"
               className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
             >
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                 <ClipboardList className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="font-medium text-sm">Submissions</p>
-                <p className="text-xs text-muted-foreground">Review requests</p>
+                <p className="font-medium text-sm">Registrations</p>
+                <p className="text-xs text-muted-foreground">Manage forms</p>
               </div>
             </Link>
             <Link

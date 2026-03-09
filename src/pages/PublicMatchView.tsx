@@ -31,8 +31,7 @@ export default function PublicMatchView() {
           match_format,
           event:events(name),
           sport_category:sports_categories(name, icon)
-        ),
-        scores(*)
+        )
       `)
       .eq('id', id)
       .maybeSingle();
@@ -48,7 +47,6 @@ export default function PublicMatchView() {
     const channel = supabase
       .channel(`public-match-${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${id}` }, fetchMatch)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, fetchMatch)
       .subscribe();
 
     return () => {
@@ -87,11 +85,12 @@ export default function PublicMatchView() {
   }
 
   const { teamAScore, teamBScore } = getTeamScores(match);
+  const winnerId = match.winner_id || match.winner_team_id;
   const winnerName =
     match.status === MatchStatusEnum.Finalized
-      ? match.winner_id === match.team_a_id
+      ? winnerId === match.team_a_id
         ? match.team_a?.name
-        : match.winner_id === match.team_b_id
+        : winnerId === match.team_b_id
           ? match.team_b?.name
           : 'Draw'
       : null;
@@ -122,7 +121,7 @@ export default function PublicMatchView() {
             <StatusBadge status={match.status} />
             {match.round && (
               <span className="text-sm text-muted-foreground">
-                {match.phase === 'knockout' ? match.round.toUpperCase() : `Round ${match.round}`}
+                {String(match.round).replace(/_/g, ' ').toUpperCase()}
               </span>
             )}
           </div>

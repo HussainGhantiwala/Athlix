@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Plus, BookOpen, Edit2, Trash2, Eye, Send, FileText } from 'lucide-react';
+import { Plus, BookOpen, Edit2, Trash2, Eye, Send, FileText, Download } from 'lucide-react';
 
 interface RuleBook {
   id: string;
@@ -252,16 +252,14 @@ export default function RuleBookManager() {
 
                 <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   {book.pdf_url && (
-                    <a
-                      href={book.pdf_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
-                      className="flex items-center gap-1 text-primary hover:underline"
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => window.open(book.pdf_url!, '_blank')}
                     >
-                      <FileText className="h-3.5 w-3.5" />
-                      Download Rule Book
-                    </a>
+                      <Download className="h-4 w-4 mr-1.5" />
+                      Download PDF
+                    </Button>
                   )}
                 </div>
 

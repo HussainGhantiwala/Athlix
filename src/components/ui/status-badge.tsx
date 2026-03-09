@@ -12,7 +12,6 @@ const statusConfig: Record<StatusType, { label: string; className: string }> = {
   // Match statuses
   scheduled: { label: 'Scheduled', className: 'bg-muted text-muted-foreground' },
   live: { label: 'LIVE', className: 'bg-status-live text-white animate-pulse-slow' },
-  paused: { label: 'Paused', className: 'bg-status-provisional text-white' },
   completed_provisional: { label: 'Provisional', className: 'bg-status-provisional text-white' },
   finalized: { label: 'Finalized', className: 'bg-status-finalized text-white' },
   cancelled: { label: 'Cancelled', className: 'bg-status-cancelled text-white' },

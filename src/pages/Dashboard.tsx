@@ -23,21 +23,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-    
-    // Subscribe to live match updates
-    const channel = supabase
-      .channel('dashboard-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        fetchLiveMatches();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => {
-        fetchLiveMatches();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   const fetchDashboardData = async () => {
@@ -48,9 +33,9 @@ export default function Dashboard() {
 
   const fetchStats = async () => {
     const [eventsRes, teamsRes, matchesRes] = await Promise.all([
-      supabase.from('events').select('id, status', { count: 'exact' }),
-      supabase.from('teams').select('id', { count: 'exact' }),
-      supabase.from('matches').select('id, status', { count: 'exact' }),
+      supabase.from('events').select('id, status', { count: 'exact', head: true }),
+      supabase.from('teams').select('id', { count: 'exact', head: true }),
+      supabase.from('matches').select('id, status'),
     ]);
 
     const activeEvents = eventsRes.data?.filter((e) => e.status === 'active').length || 0;
@@ -68,12 +53,12 @@ export default function Dashboard() {
     const { data } = await supabase
       .from('matches')
       .select(`
-        *,
+        id, status, started_at, scheduled_at, team_a_id, team_b_id, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, match_phase, phase, round, group_name, winner_team_id, event_sport_id,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
         team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
         venue:venues(name),
         event_sport:event_sports(sport_category:sports_categories(name, icon)),
-        scores(*)
+        scores(id, team_id, score_value, score_details, is_winner)
       `)
       .eq('status', 'live')
       .order('started_at', { ascending: false })

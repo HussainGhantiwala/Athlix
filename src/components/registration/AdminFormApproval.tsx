@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, ClipboardList, Clock, Users, User, Shield, Eye } from 'lucide-react';
 import { FormFieldBuilder, type FormField } from './FormFieldBuilder';
+import { getEventSportsFromApprovedForms } from '@/lib/eventSportConfig';
 
 interface RegistrationForm {
   id: string;
@@ -64,16 +65,22 @@ export default function AdminFormApproval() {
     setLoading(false);
   };
 
-  const handlePublish = async (formId: string) => {
+  const handlePublish = async (form: RegistrationForm) => {
     const { error } = await supabase
       .from('registration_forms')
       .update({ status: 'published' })
-      .eq('id', formId);
+      .eq('id', form.id);
 
     if (error) {
       toast.error('Failed to publish');
     } else {
-      toast.success('Registration form published! Students can now register.');
+      try {
+        await getEventSportsFromApprovedForms(form.event_id);
+      } catch (syncError: any) {
+        toast.error(syncError.message || 'Form published but sport sync failed.');
+      }
+
+      toast.success('Registration form published! Sport is now available for the event.');
       fetchForms();
     }
   };
@@ -168,7 +175,7 @@ export default function AdminFormApproval() {
                         <Button
                           size="sm"
                           className="bg-status-live hover:bg-status-live/90 text-white"
-                          onClick={() => handlePublish(form.id)}
+                          onClick={() => handlePublish(form)}
                         >
                           <Shield className="h-4 w-4 mr-1" />
                           Publish

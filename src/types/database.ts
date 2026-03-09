@@ -1,20 +1,11 @@
 export type AppRole = 'admin' | 'faculty' | 'student_coordinator' | 'student';
 export type EventStatus = 'draft' | 'pending_approval' | 'approved' | 'active' | 'completed' | 'cancelled';
-export enum MatchStatusEnum {
-  Scheduled = 'scheduled',
-  Live = 'live',
-  Paused = 'paused',
-  Completed = 'completed',
-  CompletedProvisional = 'completed_provisional',
-  Finalized = 'finalized',
-  Cancelled = 'cancelled',
-}
-
-export type MatchStatus = 'scheduled' | 'live' | 'paused' | 'completed' | 'completed_provisional' | 'finalized' | 'cancelled';
-export type MatchPhase = 'group' | 'knockout';
+export type MatchStatus = 'scheduled' | 'live' | 'completed_provisional' | 'finalized' | 'cancelled';
 export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
 export type TeamStatus = 'forming' | 'pending_approval' | 'approved' | 'locked';
 export type BudgetStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+export type TournamentType = 'knockout' | 'group' | 'league';
+export type ResultStatus = 'pending' | 'completed' | 'advanced' | 'eliminated' | 'draw';
 
 export interface Profile {
   id: string;
@@ -57,6 +48,7 @@ export interface Event {
   end_date: string;
   venue?: string;
   status: EventStatus;
+  tournament_type?: TournamentType;
   banner_url?: string;
   registration_deadline?: string;
   created_by?: string;
@@ -120,8 +112,6 @@ export interface Registration {
 export interface Team {
   id: string;
   event_sport_id: string;
-  event_id?: string | null;
-  sport_id?: string | null;
   name: string;
   university_id?: string;
   captain_id?: string;
@@ -133,36 +123,6 @@ export interface Team {
   updated_at: string;
   university?: University;
   members?: TeamMember[];
-}
-
-export interface Participant {
-  id: string;
-  event_id: string;
-  sport_id: string;
-  name: string;
-  type: 'team' | 'individual';
-  created_at: string;
-}
-
-export interface RegistrationSubmission {
-  id: string;
-  form_id: string;
-  event_id: string;
-  sport_id: string;
-  user_id: string;
-  submitted_by: string;
-  team_id?: string | null;
-  team_name?: string | null;
-  team_members?: { name: string }[] | null;
-  submission_data?: Record<string, any>;
-  status: RegistrationStatus;
-  reviewed_by?: string | null;
-  reviewed_at?: string | null;
-  created_at: string;
-  event?: Event;
-  sport?: SportsCategory;
-  team?: Team | null;
-  profile?: Profile | null;
 }
 
 export interface TeamMember {
@@ -190,33 +150,15 @@ export interface Venue {
 export interface Match {
   id: string;
   event_sport_id: string;
-  event_id?: string | null;
-  sport_id?: string | null;
-  participant_a_name?: string | null;
-  participant_b_name?: string | null;
   venue_id?: string;
   team_a_id?: string;
   team_b_id?: string;
-  participant_a_id?: string | null;
-  participant_b_id?: string | null;
-  winner_participant_id?: string | null;
-  next_match_id?: string | null;
-  winner_name?: string | null;
   scheduled_at: string;
-  phase?: MatchPhase;
-  group_name?: string | null;
-  round?: string | number | null;
-  round_number?: number | null;
-  bracket_position?: number;
+  round?: string;
   match_number?: number;
   status: MatchStatus;
-  score_data?: Record<string, any> | null;
-  winner_id?: string | null;
-  start_time?: string | null;
-  end_time?: string | null;
   current_editor_id?: string;
   editor_locked_at?: string;
-  // Legacy columns retained for backwards compatibility with existing screens.
   started_at?: string;
   completed_at?: string;
   finalized_by?: string;
@@ -224,10 +166,32 @@ export interface Match {
   created_by?: string;
   created_at: string;
   updated_at: string;
+  // Tournament fields
+  next_match_id?: string;
+  group_name?: string;
+  phase?: string;
+  match_phase?: string;
+  result_status?: ResultStatus;
+  winner_id?: string;
+  winner_team_id?: string;
+  score_a?: number;
+  score_b?: number;
+  // Toss fields
+  toss_winner_id?: string;
+  toss_decision?: string;
+  batting_team_id?: string;
+  bowling_team_id?: string;
+  // Cricket live scoring fields
+  runs_a?: number;
+  wickets_a?: number;
+  balls_a?: number;
+  runs_b?: number;
+  wickets_b?: number;
+  balls_b?: number;
+  innings?: number;
+  target_score?: number;
   team_a?: Team;
   team_b?: Team;
-  participant_a?: Participant | null;
-  participant_b?: Participant | null;
   venue?: Venue;
   event_sport?: EventSport;
   scores?: Score[];
@@ -289,19 +253,19 @@ export interface ScoreHistory {
   created_at: string;
 }
 
-export interface GroupStanding {
+export interface TeamStanding {
   id: string;
   event_id: string;
-  group_name: string;
+  event_sport_id: string;
+  group_name?: string;
   team_id: string;
+  team_name: string;
   played: number;
   won: number;
   lost: number;
   draw: number;
   points: number;
   goal_difference: number;
-  net_run_rate: number;
   created_at: string;
   updated_at: string;
-  team?: Team;
 }

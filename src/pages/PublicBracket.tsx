@@ -7,15 +7,16 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 
 type RoundEntry = {
-  round: number;
+  round: string;
   matches: Match[];
 };
 
-const getRoundLabel = (round: number, totalRounds: number) => {
-  if (round === totalRounds) return 'Final';
-  if (round === totalRounds - 1) return 'Semifinal';
-  if (round === totalRounds - 2) return 'Quarterfinal';
-  return `Round ${round}`;
+const getRoundLabel = (round: string) => {
+  if (round === 'round_of_16') return 'Round of 16';
+  if (round === 'quarterfinal') return 'Quarterfinal';
+  if (round === 'semifinal') return 'Semifinal';
+  if (round === 'final') return 'Final';
+  return round.replace(/_/g, ' ');
 };
 
 export default function PublicBracket() {
@@ -46,7 +47,7 @@ export default function PublicBracket() {
           scheduled_at
         `)
         .eq('event_id', eventId)
-        .eq('phase', 'knockout')
+        .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final'])
         .order('round', { ascending: true })
         .order('match_number', { ascending: true }),
     ]);
@@ -82,17 +83,18 @@ export default function PublicBracket() {
   }, [eventId]);
 
   const rounds = useMemo<RoundEntry[]>(() => {
-    const grouped = new Map<number, Match[]>();
+    const grouped = new Map<string, Match[]>();
+    const roundOrder = ['round_of_16', 'quarterfinal', 'semifinal', 'final'];
 
     matches.forEach((match) => {
-      const rawRound = match.round_number ?? Number(match.round);
-      if (!rawRound || Number.isNaN(rawRound)) return;
+      const rawRound = String(match.round || '').toLowerCase();
+      if (!rawRound) return;
       if (!grouped.has(rawRound)) grouped.set(rawRound, []);
       grouped.get(rawRound)!.push(match);
     });
 
     return Array.from(grouped.entries())
-      .sort((a, b) => a[0] - b[0])
+      .sort((a, b) => roundOrder.indexOf(a[0]) - roundOrder.indexOf(b[0]))
       .map(([round, roundMatches]) => ({
         round,
         matches: [...roundMatches].sort((a, b) => (a.match_number ?? 0) - (b.match_number ?? 0)),
@@ -137,7 +139,7 @@ export default function PublicBracket() {
                 return (
                   <div key={round.round} className={`round ${isFinalRound ? 'final-round' : ''}`}>
                     <div className="text-sm font-medium text-muted-foreground mb-2">
-                      {getRoundLabel(round.round, rounds.length)}
+                      {getRoundLabel(round.round)}
                     </div>
 
                     {round.matches.map((match) => {

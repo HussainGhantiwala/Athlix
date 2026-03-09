@@ -47,6 +47,18 @@ const toSafeInt = (value: unknown) => {
   return 0;
 };
 
+const KNOCKOUT_ROUNDS = new Set(['round_of_16', 'quarterfinal', 'semifinal', 'final']);
+const isKnockoutRound = (round: unknown) => KNOCKOUT_ROUNDS.has(String(round || '').toLowerCase());
+const formatTournamentStage = (round: unknown) => {
+  const key = String(round || '').toLowerCase();
+  if (key === 'group_stage') return 'Group Stage';
+  if (key === 'round_of_16') return 'Round of 16';
+  if (key === 'quarterfinal') return 'Quarterfinal';
+  if (key === 'semifinal') return 'Semifinal';
+  if (key === 'final') return 'Final';
+  return 'Unspecified';
+};
+
 export default function MatchControlPanel() {
   const { user, role } = useAuth();
   const canControl = role === 'student_coordinator';
@@ -91,46 +103,39 @@ export default function MatchControlPanel() {
     return () => window.clearInterval(interval);
   }, [timerState, matches]);
 
-  const { liveMatches, pausedMatches, scheduledMatches } = useMemo(() => {
+  const { liveMatches, pausedMatches, scheduledMatches, completedMatches } = useMemo(() => {
     return {
       liveMatches: matches.filter((m) => m.status === MatchStatusEnum.Live),
       pausedMatches: matches.filter((m) => m.status === MatchStatusEnum.Paused),
       scheduledMatches: matches.filter((m) => m.status === MatchStatusEnum.Scheduled),
+      completedMatches: matches.filter((m) => m.status === MatchStatusEnum.Completed),
     };
   }, [matches]);
 
   const fetchMatches = async () => {
     setLoading(true);
+    const matchSelect = `
+      *,
+      event_sport:event_sports(
+        event:events(start_date, name, tournament_type),
+        sport_category:sports_categories(name, icon)
+      ),
+      venue:venues(name)
+    `;
 
-    const { data: scheduledData, error: scheduledError } = await supabase
+    const { data, error } = await supabase
       .from('matches')
-      .select('*')
-      .eq('status', 'scheduled')
+      .select(matchSelect)
+      .in('status', [MatchStatusEnum.Scheduled, MatchStatusEnum.Live, MatchStatusEnum.Paused, MatchStatusEnum.Completed])
       .order('scheduled_at', { ascending: true });
 
-    if (scheduledError) {
-      toast.error('Failed to load matches');
+    if (error) {
+      toast.error(error.message || 'Failed to load matches');
       setLoading(false);
       return;
     }
 
-    const { data: activeData, error: activeError } = await supabase
-      .from('matches')
-      .select('*')
-      .in('status', [MatchStatusEnum.Live, MatchStatusEnum.Paused])
-      .order('scheduled_at', { ascending: true });
-
-    if (activeError) {
-      setMatches((scheduledData as unknown as Match[]) || []);
-      setLoading(false);
-      return;
-    }
-
-    const merged = [
-      ...((activeData as unknown as Match[]) || []),
-      ...((scheduledData as unknown as Match[]) || []),
-    ];
-    setMatches(merged);
+    setMatches((data as unknown as Match[]) || []);
     setLoading(false);
   };
 
@@ -149,10 +154,16 @@ export default function MatchControlPanel() {
   };
 
   const persistScoreData = async (match: Match, scoreData: Match['score_data'], silent = false) => {
+    const scoreRows = getScoreRowsForUpsert(match, normalizeScoreData({ ...match, score_data: scoreData }), user?.id);
+    const scoreA = scoreRows.find((row) => row.team_id === match.team_a_id)?.score_value ?? 0;
+    const scoreB = scoreRows.find((row) => row.team_id === match.team_b_id)?.score_value ?? 0;
+
     const { error } = await supabase
       .from('matches')
       .update({
         score_data: scoreData,
+        score_a: scoreA,
+        score_b: scoreB,
       } as any)
       .eq('id', match.id);
 
@@ -161,13 +172,12 @@ export default function MatchControlPanel() {
       return false;
     }
 
-    const rows = getScoreRowsForUpsert(match, normalizeScoreData({ ...match, score_data: scoreData }), user?.id);
     if (isParticipantMatch(match)) {
       if (!silent) toast.success('Score updated');
       return true;
     }
 
-    for (const row of rows) {
+    for (const row of scoreRows) {
       const { error: rowError } = await supabase
         .from('scores')
         .upsert(row, { onConflict: 'match_id,team_id' });
@@ -302,38 +312,11 @@ export default function MatchControlPanel() {
           ? participantBName
           : null);
 
-    const requiresWinner = !!match.next_match_id || match.phase === 'knockout';
+    const requiresWinner = !!match.next_match_id || isKnockoutRound(match.round);
 
     if (!winnerName && requiresWinner) {
       setBusyMatchId(null);
       toast.error('Cannot end knockout match without a winner');
-      return;
-    }
-
-    if (!winnerName) {
-      const completedAt = new Date().toISOString();
-      const { error: completeError } = await supabase
-        .from('matches')
-        .update({
-          status: MatchStatusEnum.Completed,
-          end_time: completedAt,
-          completed_at: completedAt,
-          current_editor_id: null,
-          editor_locked_at: null,
-          winner_id: winnerId,
-          winner_participant_id: participantWinnerId,
-        } as any)
-        .eq('id', match.id);
-
-      setBusyMatchId(null);
-      setTimerState((prev) => ({ ...prev, [match.id]: false }));
-      if (completeError) {
-        toast.error(completeError.message || 'Unable to end match');
-        return;
-      }
-
-      toast.success('Match completed');
-      await fetchMatches();
       return;
     }
 
@@ -354,7 +337,7 @@ export default function MatchControlPanel() {
     }
 
     try {
-      await TournamentService.endMatch(match.id, winnerName);
+      await TournamentService.endMatch(match.id, winnerName ?? null);
       toast.success('Match completed');
     } catch (error) {
       setBusyMatchId(null);
@@ -597,12 +580,34 @@ export default function MatchControlPanel() {
     const canStartByDate = !eventStartDate || new Date() >= new Date(`${eventStartDate}T00:00:00`);
     const startDisabled = isBusy || !canStartByDate;
     const startDisabledReason = canStartByDate ? '' : 'Match can only start after event start date.';
-    const phaseLabel = match.phase === 'group' ? 'Group' : 'Knockout';
+    const phaseLabel = formatTournamentStage(match.round);
+    const currentRound =
+      typeof match.round_number === 'number'
+        ? match.round_number
+        : typeof match.round === 'number'
+          ? match.round
+          : null;
+    const nextRound = match.next_match_id && typeof currentRound === 'number' ? currentRound + 1 : null;
+    const winnerName = match.winner_name || null;
+    const loserName =
+      winnerName === participantAName
+        ? participantBName
+        : winnerName === participantBName
+          ? participantAName
+          : null;
+    const completedResult = match.status === MatchStatusEnum.Completed || match.status === MatchStatusEnum.Finalized;
+    const sportName = match.event_sport?.sport_category?.name || null;
+    const eventName = match.event_sport?.event?.name || null;
 
     return (
       <div key={match.id} className="dashboard-card p-5 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
+            {eventName && (
+              <div className="sport-label text-xs font-medium text-muted-foreground mb-1">
+                {sportName ? `${sportName} — ${eventName}` : eventName}
+              </div>
+            )}
             <p className="font-medium">
               {participantAName} vs {participantBName}
             </p>
@@ -634,6 +639,30 @@ export default function MatchControlPanel() {
             <p className="text-3xl font-display font-bold">{teamBScore}</p>
           </div>
         </div>
+
+        {completedResult && (
+          <div className="space-y-2">
+            {winnerName && (
+              <div className="result-badge text-sm font-medium text-accent">
+                Winner: {winnerName}
+              </div>
+            )}
+            {isKnockoutRound(match.round) && winnerName && (
+              <div className="text-xs text-muted-foreground">
+                {nextRound
+                  ? `Advanced to Round ${nextRound}`
+                  : match.next_match_id
+                    ? 'Advanced to next match'
+                    : 'Winner of final'}
+              </div>
+            )}
+            {isKnockoutRound(match.round) && loserName && (
+              <div className="text-xs text-muted-foreground">
+                Eliminated: {loserName}
+              </div>
+            )}
+          </div>
+        )}
 
         {renderControls(match)}
 
@@ -745,6 +774,17 @@ export default function MatchControlPanel() {
           ) : (
             <div className="dashboard-card p-6 text-center">
               <p className="text-muted-foreground">No scheduled matches.</p>
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-xl font-display font-bold">Completed Matches ({completedMatches.length})</h2>
+          {completedMatches.length ? (
+            <div className="grid lg:grid-cols-2 gap-4">{completedMatches.map(renderMatchCard)}</div>
+          ) : (
+            <div className="dashboard-card p-6 text-center">
+              <p className="text-muted-foreground">No completed matches yet.</p>
             </div>
           )}
         </section>

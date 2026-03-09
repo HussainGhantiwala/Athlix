@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,6 +6,8 @@
    ATHLETIX Design System
    University-grade sports management platform
    ============================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -50,7 +50,6 @@
 
     /* Status Colors */
     --status-live: 142 76% 36%;
-    --status-paused: 32 95% 54%;
     --status-provisional: 38 92% 50%;
     --status-finalized: 217 91% 60%;
     --status-scheduled: 215 16% 47%;
@@ -147,10 +146,6 @@
   .status-provisional {
     @apply bg-status-provisional text-white;
   }
-
-  .status-paused {
-    @apply bg-status-paused text-white;
-  }
   
   .status-finalized {
     @apply bg-status-finalized text-white;
@@ -178,24 +173,6 @@
   /* Dashboard Card */
   .dashboard-card {
     @apply bg-card rounded-xl border border-border shadow-sm hover:shadow-md transition-all duration-200;
-  }
-
-  .bracket {
-    display: flex;
-    gap: 60px;
-    align-items: stretch;
-  }
-
-  .round {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-around;
-    gap: 16px;
-    min-width: 260px;
-  }
-
-  .round.final-round {
-    justify-content: center;
   }
 
   /* Stat Card */
@@ -256,15 +233,5 @@
   /* Focus Ring */
   .focus-ring {
     @apply focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2;
-  }
-
-  @media (max-width: 768px) {
-    .bracket {
-      gap: 32px;
-    }
-
-    .round {
-      min-width: 220px;
-    }
   }
 }

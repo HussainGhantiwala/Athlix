@@ -8,15 +8,17 @@ import { LiveMatchCard } from '@/components/dashboard/LiveMatchCard';
 import { UpcomingEventCard } from '@/components/dashboard/UpcomingEventCard';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Match, Event } from '@/types/database';
+import { Match, Event, Registration, Team } from '@/types/database';
 import {
   Calendar,
   Users,
   Target,
   Trophy,
   ClipboardCheck,
+  Clock,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { format } from 'date-fns';
 import { UpcomingEventsSection } from '@/components/student/UpcomingEventsSection';
 
 interface StudentStats {
@@ -24,15 +26,6 @@ interface StudentStats {
   myTeams: number;
   upcomingEvents: number;
   liveMatches: number;
-}
-
-interface StudentRegistrationRow {
-  id: string;
-  status: 'pending' | 'approved' | 'rejected';
-  created_at: string;
-  team_name: string | null;
-  event?: { name: string } | null;
-  sport?: { name: string; icon: string | null } | null;
 }
 
 export default function StudentDashboard() {
@@ -44,8 +37,8 @@ export default function StudentDashboard() {
     upcomingEvents: 0,
     liveMatches: 0,
   });
-  const [myRegistrations, setMyRegistrations] = useState<StudentRegistrationRow[]>([]);
-  const [myTeams, setMyTeams] = useState<string[]>([]);
+  const [myRegistrations, setMyRegistrations] = useState<Registration[]>([]);
+  const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<Event[]>([]);
 
@@ -83,29 +76,16 @@ export default function StudentDashboard() {
   };
 
   const fetchStats = async () => {
-    const [registrationsRes, teamNamesRes, eventsRes, matchesRes] = await Promise.all([
-      supabase
-        .from('registration_submissions')
-        .select('id', { count: 'exact' })
-        .eq('user_id', user?.id || ''),
-      supabase
-        .from('registration_submissions')
-        .select('team_name')
-        .eq('user_id', user?.id || '')
-        .not('team_name', 'is', null),
+    const [registrationsRes, teamsRes, eventsRes, matchesRes] = await Promise.all([
+      supabase.from('registrations').select('id', { count: 'exact' }).eq('user_id', user?.id || ''),
+      supabase.from('team_members').select('id', { count: 'exact' }).eq('user_id', user?.id || ''),
       supabase.from('events').select('id', { count: 'exact' }).in('status', ['approved', 'active']),
       supabase.from('matches').select('id', { count: 'exact' }).eq('status', 'live'),
     ]);
 
-    const distinctTeamNames = new Set<string>();
-    (teamNamesRes.data || []).forEach((row) => {
-      const name = row.team_name?.trim();
-      if (name) distinctTeamNames.add(name);
-    });
-
     setStats({
       myRegistrations: registrationsRes.count || 0,
-      myTeams: distinctTeamNames.size,
+      myTeams: teamsRes.count || 0,
       upcomingEvents: eventsRes.count || 0,
       liveMatches: matchesRes.count || 0,
     });
@@ -113,40 +93,51 @@ export default function StudentDashboard() {
 
   const fetchMyRegistrations = async () => {
     const { data } = await supabase
-      .from('registration_submissions')
+      .from('registrations')
       .select(`
         *,
-        event:events(name),
-        sport:sports_categories(name, icon)
+        event_sport:event_sports(
+          sport_category:sports_categories(name, icon),
+          event:events(name, start_date, end_date)
+        )
       `)
       .eq('user_id', user?.id || '')
       .order('created_at', { ascending: false })
       .limit(5);
 
-    setMyRegistrations((data as unknown as StudentRegistrationRow[]) || []);
+    setMyRegistrations((data as unknown as Registration[]) || []);
   };
 
   const fetchMyTeams = async () => {
-    const { data } = await supabase
-      .from('registration_submissions')
-      .select('team_name')
-      .eq('user_id', user?.id || '')
-      .not('team_name', 'is', null);
+    const { data: teamMemberships } = await supabase
+      .from('team_members')
+      .select(`
+        team:teams(
+          *,
+          university:universities(name, short_name),
+          event_sport:event_sports(
+            sport_category:sports_categories(name, icon),
+            event:events(name)
+          )
+        )
+      `)
+      .eq('user_id', user?.id || '');
 
-    const names = new Set<string>();
-    (data || []).forEach((row) => {
-      const teamName = row.team_name?.trim();
-      if (teamName) {
-        names.add(teamName);
-      }
-    });
-    setMyTeams(Array.from(names.values()));
+    const teams = teamMemberships?.map(tm => tm.team).filter(Boolean) || [];
+    setMyTeams(teams as unknown as Team[]);
   };
 
   const fetchLiveMatches = async () => {
     const { data } = await supabase
       .from('matches')
-      .select('*')
+      .select(`
+        *,
+        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+        venue:venues(name),
+        event_sport:event_sports(sport_category:sports_categories(name, icon)),
+        scores(*)
+      `)
       .eq('status', 'live')
       .order('started_at', { ascending: false })
       .limit(6);
@@ -282,16 +273,15 @@ export default function StudentDashboard() {
                     className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-xl">{reg.sport?.icon}</span>
+                      <span className="text-xl">{reg.event_sport?.sport_category?.icon}</span>
                       <div>
-                        <p className="font-medium text-sm">{reg.sport?.name}</p>
+                        <p className="font-medium text-sm">{reg.event_sport?.sport_category?.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {reg.event?.name}
-                          {reg.team_name ? ` • ${reg.team_name}` : ''}
+                          {reg.event_sport?.event?.name}
                         </p>
                       </div>
                     </div>
-                    <StatusBadge status={reg.status} />
+                    <StatusBadge status={reg.status as any} />
                   </div>
                 ))}
               </div>
@@ -326,9 +316,9 @@ export default function StudentDashboard() {
               </div>
             ) : myTeams.length > 0 ? (
               <div className="space-y-3">
-                {myTeams.map((teamName) => (
+                {myTeams.map(team => (
                   <div
-                    key={teamName}
+                    key={team.id}
                     className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
                   >
                     <div className="flex items-center gap-3">
@@ -336,9 +326,13 @@ export default function StudentDashboard() {
                         <Users className="h-5 w-5 text-primary" />
                       </div>
                       <div>
-                        <p className="font-medium text-sm">{teamName}</p>
+                        <p className="font-medium text-sm">{team.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {team.university?.short_name}
+                        </p>
                       </div>
                     </div>
+                    <StatusBadge status={team.status as any} />
                   </div>
                 ))}
               </div>

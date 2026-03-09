@@ -53,7 +53,6 @@ const getNavItemsForRole = (role: AppRole | null): NavItem[] => {
         { label: 'Universities', href: '/admin/universities', icon: <Building2 className="h-5 w-5" /> },
         { label: 'Events', href: '/admin/events', icon: <Calendar className="h-5 w-5" /> },
         { label: 'Coordinators', href: '/admin/coordinators', icon: <UserPlus className="h-5 w-5" /> },
-        { label: 'Registrations', href: '/admin/registration', icon: <ClipboardList className="h-5 w-5" /> },
         { label: 'Form Approval', href: '/admin/form-approval', icon: <ListChecks className="h-5 w-5" /> },
         { label: 'Submissions', href: '/admin/submissions', icon: <Inbox className="h-5 w-5" /> },
         { label: 'Rule Book', href: '/admin/rule-book', icon: <BookOpen className="h-5 w-5" /> },
@@ -73,16 +72,15 @@ const getNavItemsForRole = (role: AppRole | null): NavItem[] => {
         { label: 'Teams', href: '/faculty/teams', icon: <Users className="h-5 w-5" /> },
         { label: 'Matches', href: '/faculty/matches', icon: <Target className="h-5 w-5" /> },
         { label: 'Finalize Scores', href: '/faculty/score-finalization', icon: <Target className="h-5 w-5" /> },
+        { label: 'Registrations', href: '/faculty/registrations', icon: <ClipboardList className="h-5 w-5" /> },
         { label: 'Budgets', href: '/faculty/budgets', icon: <DollarSign className="h-5 w-5" /> },
       ];
     case 'student_coordinator':
       return [
         { label: 'Dashboard', href: '/coordinator', icon: <LayoutDashboard className="h-5 w-5" /> },
-        { label: 'Events', href: '/coordinator/events', icon: <Calendar className="h-5 w-5" /> },
-        { label: 'Teams', href: '/coordinator/teams', icon: <Users className="h-5 w-5" /> },
-        { label: 'Matches', href: '/coordinator/matches', icon: <Target className="h-5 w-5" /> },
-        { label: 'Reports', href: '/coordinator/reports', icon: <FileText className="h-5 w-5" /> },
         { label: 'Score Control', href: '/coordinator/score-control', icon: <Target className="h-5 w-5" /> },
+        { label: 'Matches', href: '/coordinator/matches', icon: <Target className="h-5 w-5" /> },
+        { label: 'Teams', href: '/coordinator/teams', icon: <Users className="h-5 w-5" /> },
         { label: 'Form Builder', href: '/coordinator/form-builder', icon: <PenTool className="h-5 w-5" /> },
         { label: 'Submissions', href: '/coordinator/submissions', icon: <Inbox className="h-5 w-5" /> },
         { label: 'Rule Book', href: '/coordinator/rule-book', icon: <BookOpen className="h-5 w-5" /> },
@@ -95,6 +93,7 @@ const getNavItemsForRole = (role: AppRole | null): NavItem[] => {
         { label: 'Rule Book', href: '/student/rule-book', icon: <BookOpen className="h-5 w-5" /> },
         { label: 'Events', href: '/student/events', icon: <Calendar className="h-5 w-5" /> },
         { label: 'My Teams', href: '/student/teams', icon: <Users className="h-5 w-5" /> },
+        { label: 'My Registrations', href: '/student/registrations', icon: <ClipboardList className="h-5 w-5" /> },
         { label: 'Matches', href: '/student/matches', icon: <Target className="h-5 w-5" /> },
       ];
   }

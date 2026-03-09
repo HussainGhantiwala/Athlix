@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Calendar, MapPin, Clock, CheckCircle } from 'lucide-react';
+import { Calendar, MapPin, Clock, CheckCircle, Loader2 } from 'lucide-react';
 import { format, isPast } from 'date-fns';
+import { toast } from 'sonner';
 
 interface EventSportWithDetails {
   id: string;
@@ -33,6 +34,7 @@ export function UpcomingEventsSection() {
   const [loading, setLoading] = useState(true);
   const [eventSports, setEventSports] = useState<EventSportWithDetails[]>([]);
   const [myRegistrations, setMyRegistrations] = useState<Set<string>>(new Set());
+  const [registering, setRegistering] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -62,13 +64,30 @@ export function UpcomingEventsSection() {
   const fetchMyRegistrations = async () => {
     if (!user?.id) return;
     const { data } = await supabase
-      .from('registration_submissions')
-      .select('event_id, sport_id')
-      .eq('user_id', user.id)
-      .in('status', ['pending', 'approved']);
+      .from('registrations')
+      .select('event_sport_id')
+      .eq('user_id', user.id);
 
-    const keys = (data || []).map((row: any) => `${row.event_id}:${row.sport_id}`);
-    setMyRegistrations(new Set(keys));
+    setMyRegistrations(new Set(data?.map(r => r.event_sport_id) || []));
+  };
+
+  const handleRegister = async (eventSportId: string) => {
+    if (!user?.id) return;
+    setRegistering(eventSportId);
+
+    const { error } = await supabase.from('registrations').insert({
+      event_sport_id: eventSportId,
+      user_id: user.id,
+      status: 'pending',
+    });
+
+    if (error) {
+      toast.error(error.message || 'Failed to register');
+    } else {
+      toast.success('Registration submitted successfully!');
+      setMyRegistrations(prev => new Set([...prev, eventSportId]));
+    }
+    setRegistering(null);
   };
 
   const isDeadlinePassed = (deadline: string | null) => {
@@ -96,8 +115,7 @@ export function UpcomingEventsSection() {
       <h2 className="text-xl font-display font-bold">Upcoming Events — Register Now</h2>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {eventSports.map((es) => {
-          const registrationKey = `${es.event_id}:${es.sport_category_id}`;
-          const isRegistered = myRegistrations.has(registrationKey);
+          const isRegistered = myRegistrations.has(es.id);
           const deadlinePassed = isDeadlinePassed(es.registration_deadline);
           const isClosed = es.registration_form_status === 'closed' || deadlinePassed;
 
@@ -158,10 +176,16 @@ export function UpcomingEventsSection() {
                   ) : isClosed ? (
                     <Button disabled className="w-full" variant="outline">Registration Closed</Button>
                   ) : (
-                    <Button className="w-full" asChild>
-                      <Link to="/student/open-registrations">
-                        Open Registration Form
-                      </Link>
+                    <Button
+                      className="w-full"
+                      onClick={() => handleRegister(es.id)}
+                      disabled={registering === es.id}
+                    >
+                      {registering === es.id ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Registering...</>
+                      ) : (
+                        'Register Now'
+                      )}
                     </Button>
                   )}
                 </div>

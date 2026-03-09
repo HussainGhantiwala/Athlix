@@ -31,6 +31,16 @@ const getTeamScoresFromArray = (match: Match): { teamAScore: number; teamBScore:
   return { teamAScore, teamBScore };
 };
 
+const getTeamScoresFromMatchColumns = (match: Match): { teamAScore: number; teamBScore: number } | null => {
+  const hasA = match.score_a !== undefined && match.score_a !== null;
+  const hasB = match.score_b !== undefined && match.score_b !== null;
+  if (!hasA && !hasB) return null;
+  return {
+    teamAScore: toSafeInt(match.score_a, 0),
+    teamBScore: toSafeInt(match.score_b, 0),
+  };
+};
+
 export const getInitialScoreData = (match: Match): MatchScoreData => {
   const sport = getSportKey(match);
   if (sport === 'cricket') {
@@ -103,6 +113,17 @@ export const normalizeScoreData = (match: Match): MatchScoreData => {
 };
 
 export const getTeamScores = (match: Match): { teamAScore: number; teamBScore: number } => {
+  const fromColumns = getTeamScoresFromMatchColumns(match);
+  if (fromColumns) return fromColumns;
+
+  const sport = getSportKey(match);
+  if (sport === 'cricket') {
+    return {
+      teamAScore: toSafeInt(match.runs_a, 0),
+      teamBScore: toSafeInt(match.runs_b, 0),
+    };
+  }
+
   const normalized = normalizeScoreData(match);
   if (normalized.sport === 'football' || normalized.sport === 'other') {
     return { teamAScore: normalized.teamAScore, teamBScore: normalized.teamBScore };

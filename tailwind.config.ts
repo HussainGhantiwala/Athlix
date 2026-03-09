@@ -63,7 +63,6 @@ export default {
         },
         status: {
           live: "hsl(var(--status-live))",
-          paused: "hsl(var(--status-paused))",
           provisional: "hsl(var(--status-provisional))",
           finalized: "hsl(var(--status-finalized))",
           scheduled: "hsl(var(--status-scheduled))",

@@ -1,7 +1,6 @@
-import { Match } from '@/types/database';
+import { Match, Score } from '@/types/database';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { cn } from '@/lib/utils';
-import { getTeamScores } from '@/lib/match-scoring';
 
 interface LiveMatchCardProps {
   match: Match;
@@ -9,9 +8,8 @@ interface LiveMatchCardProps {
 }
 
 export function LiveMatchCard({ match, className }: LiveMatchCardProps) {
-  const { teamAScore, teamBScore } = getTeamScores(match);
-  const participantAName = match.participant_a_name || match.participant_a?.name || match.team_a?.name || 'TBD';
-  const participantBName = match.participant_b_name || match.participant_b?.name || match.team_b?.name || 'TBD';
+  const teamAScore = match.scores?.find((s) => s.team_id === match.team_a_id)?.score_value ?? 0;
+  const teamBScore = match.scores?.find((s) => s.team_id === match.team_b_id)?.score_value ?? 0;
 
   return (
     <div className={cn('dashboard-card p-4', className)}>
@@ -28,7 +26,7 @@ export function LiveMatchCard({ match, className }: LiveMatchCardProps) {
       <div className="flex items-center justify-between">
         {/* Team A */}
         <div className="flex-1 text-center">
-          <p className="font-semibold truncate">{participantAName}</p>
+          <p className="font-semibold truncate">{match.team_a?.name || 'TBD'}</p>
           <p className="text-xs text-muted-foreground truncate">
             {match.team_a?.university?.short_name}
           </p>
@@ -55,7 +53,7 @@ export function LiveMatchCard({ match, className }: LiveMatchCardProps) {
 
         {/* Team B */}
         <div className="flex-1 text-center">
-          <p className="font-semibold truncate">{participantBName}</p>
+          <p className="font-semibold truncate">{match.team_b?.name || 'TBD'}</p>
           <p className="text-xs text-muted-foreground truncate">
             {match.team_b?.university?.short_name}
           </p>

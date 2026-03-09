@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Match, MatchStatus } from '@/types/database';
+import { Match } from '@/types/database';
 import {
   Dialog,
   DialogContent,
@@ -24,52 +25,45 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Search, Target, Play, Square, CheckCircle, Edit2, Clock } from 'lucide-react';
+import { Search, Target, CheckCircle, Edit2, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { determineWinnerId, getTeamScores } from '@/lib/match-scoring';
 
 export default function Matches() {
-  const { user, role, isStudentCoordinator } = useAuth();
+  const navigate = useNavigate();
+  const { user, isAdmin, isFaculty, isStudentCoordinator } = useAuth();
   const [loading, setLoading] = useState(true);
   const [matches, setMatches] = useState<Match[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
-  const [isScoreDialogOpen, setIsScoreDialogOpen] = useState(false);
-  const [teamAScore, setTeamAScore] = useState(0);
-  const [teamBScore, setTeamBScore] = useState(0);
-  const [updating, setUpdating] = useState(false);
   const [finalizeReason, setFinalizeReason] = useState('');
   const [isFinalizeDialogOpen, setIsFinalizeDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchMatches();
-    
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel('matches-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        fetchMatches();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => {
-        fetchMatches();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [statusFilter]);
 
   const fetchMatches = async () => {
     setLoading(true);
-    const query = supabase
+    let query = supabase
       .from('matches')
-      .select('*')
-      .eq('status', 'scheduled')
-      .order('scheduled_at', { ascending: true });
+      .select(`
+        *,
+        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+        venue:venues(name),
+        event_sport:event_sports(
+          sport_category:sports_categories(name, icon),
+          event:events(name)
+        )
+      `)
+      .order('scheduled_at', { ascending: false });
+
+    if (statusFilter !== 'all') {
+      query = query.eq('status', statusFilter as any);
+    }
 
     const { data, error } = await query;
     if (error) {
@@ -80,114 +74,6 @@ export default function Matches() {
     setLoading(false);
   };
 
-  const handleStartMatch = async (matchId: string) => {
-    const { error } = await supabase
-      .from('matches')
-      .update({
-        status: 'live',
-      })
-      .eq('id', matchId);
-
-    if (error) {
-      toast.error('Failed to start match');
-    } else {
-      toast.success('Match started!');
-      fetchMatches();
-    }
-  };
-
-  const handleOpenScoreDialog = (match: Match) => {
-    setSelectedMatch(match);
-    const scoreData = (match.score_data || {}) as Record<string, unknown>;
-    const scoreA =
-      match.scores?.find((s) => s.team_id === match.team_a_id)?.score_value ??
-      Number(scoreData.participantAScore ?? scoreData.teamAScore ?? 0);
-    const scoreB =
-      match.scores?.find((s) => s.team_id === match.team_b_id)?.score_value ??
-      Number(scoreData.participantBScore ?? scoreData.teamBScore ?? 0);
-    setTeamAScore(scoreA);
-    setTeamBScore(scoreB);
-    setIsScoreDialogOpen(true);
-  };
-
-  const handleUpdateScore = async () => {
-    if (!selectedMatch) return;
-    setUpdating(true);
-    const isParticipantMode =
-      !!selectedMatch.participant_a_id ||
-      !!selectedMatch.participant_b_id ||
-      !!selectedMatch.participant_a_name ||
-      !!selectedMatch.participant_b_name;
-
-    if (!isParticipantMode) {
-      // Team mode keeps score-table parity.
-      const updates = [
-        {
-          match_id: selectedMatch.id,
-          team_id: selectedMatch.team_a_id,
-          score_value: teamAScore,
-          updated_by: user?.id,
-        },
-        {
-          match_id: selectedMatch.id,
-          team_id: selectedMatch.team_b_id,
-          score_value: teamBScore,
-          updated_by: user?.id,
-        },
-      ];
-
-      for (const update of updates) {
-        const { error } = await supabase
-          .from('scores')
-          .upsert(update, { onConflict: 'match_id,team_id' });
-
-        if (error) {
-          toast.error('Failed to update score');
-          setUpdating(false);
-          return;
-        }
-      }
-    }
-
-    await supabase
-      .from('matches')
-      .update({
-        score_data: {
-          sport: 'other',
-          teamAScore,
-          teamBScore,
-          participantAScore: teamAScore,
-          participantBScore: teamBScore,
-        },
-      } as any)
-      .eq('id', selectedMatch.id);
-
-    toast.success('Score updated!');
-    setIsScoreDialogOpen(false);
-    setUpdating(false);
-    fetchMatches();
-  };
-
-  const handleCompleteMatch = async (matchId: string) => {
-    const { error } = await supabase
-      .from('matches')
-      .update({
-        status: 'completed',
-        end_time: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        current_editor_id: null,
-        editor_locked_at: null,
-      })
-      .eq('id', matchId);
-
-    if (error) {
-      toast.error('Failed to complete match');
-    } else {
-      toast.success('Match completed');
-      fetchMatches();
-    }
-  };
-
   const handleOpenFinalizeDialog = (match: Match) => {
     setSelectedMatch(match);
     setFinalizeReason('');
@@ -196,21 +82,19 @@ export default function Matches() {
 
   const handleFinalizeMatch = async () => {
     if (!selectedMatch) return;
-    if (role !== 'faculty') {
-      toast.error('Only faculty can finalize matches');
-      return;
-    }
 
-    const winnerId = determineWinnerId(selectedMatch);
-    const scoreData = (selectedMatch.score_data || {}) as Record<string, unknown>;
-    const participantScoreA = Number(scoreData.participantAScore ?? scoreData.teamAScore ?? 0);
-    const participantScoreB = Number(scoreData.participantBScore ?? scoreData.teamBScore ?? 0);
-    const participantWinnerId =
-      participantScoreA === participantScoreB
-        ? null
-        : participantScoreA > participantScoreB
-          ? selectedMatch.participant_a_id || null
-          : selectedMatch.participant_b_id || null;
+    const scoreA = selectedMatch.score_a ?? selectedMatch.runs_a ?? 0;
+    const scoreB = selectedMatch.score_b ?? selectedMatch.runs_b ?? 0;
+
+    const winnerId = scoreA > scoreB ? selectedMatch.team_a_id : scoreB > scoreA ? selectedMatch.team_b_id : null;
+    const isDraw = scoreA === scoreB;
+
+    const round = String(selectedMatch.round || '').toLowerCase();
+    const isKnockoutRound = ['round_of_16', 'quarterfinal', 'semifinal', 'final'].includes(round);
+    let resultStatus: string = isDraw ? 'draw' : 'completed';
+    if (isKnockoutRound && winnerId && selectedMatch.next_match_id) {
+      resultStatus = 'advanced';
+    }
 
     const { error } = await supabase
       .from('matches')
@@ -218,17 +102,35 @@ export default function Matches() {
         status: 'finalized',
         finalized_by: user?.id,
         finalized_at: new Date().toISOString(),
-        winner_id: winnerId,
-        winner_participant_id: participantWinnerId,
+        winner_id: winnerId || undefined,
+        winner_team_id: winnerId || undefined,
+        result_status: resultStatus,
+        phase: 'finished',
       })
       .eq('id', selectedMatch.id);
 
-    // Log the finalization
+    if (!error && winnerId && selectedMatch.next_match_id) {
+      const { data: nextMatch } = await supabase
+        .from('matches')
+        .select('id, team_a_id, team_b_id')
+        .eq('id', selectedMatch.next_match_id)
+        .single();
+
+      if (nextMatch) {
+        const patch: Record<string, string> = {};
+        if (!nextMatch.team_a_id) patch.team_a_id = winnerId;
+        else if (!nextMatch.team_b_id) patch.team_b_id = winnerId;
+        if (Object.keys(patch).length > 0) {
+          await supabase.from('matches').update(patch as any).eq('id', nextMatch.id);
+        }
+      }
+    }
+
     await supabase.from('audit_logs').insert({
       table_name: 'matches',
       record_id: selectedMatch.id,
       action: 'finalize',
-      new_data: { status: 'finalized', reason: finalizeReason, winnerId, participantWinnerId },
+      new_data: { status: 'finalized', reason: finalizeReason },
       performed_by: user?.id,
     });
 
@@ -242,19 +144,9 @@ export default function Matches() {
   };
 
   const filteredMatches = matches.filter((match) =>
-    (
-      match.participant_a_name ||
-      match.participant_a?.name ||
-      match.team_a?.name ||
-      ''
-    ).toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (
-      match.participant_b_name ||
-      match.participant_b?.name ||
-      match.team_b?.name ||
-      ''
-    ).toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (match.sport_id || '').toLowerCase().includes(searchQuery.toLowerCase())
+    match.team_a?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    match.team_b?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    match.event_sport?.sport_category?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -285,8 +177,7 @@ export default function Matches() {
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="scheduled">Scheduled</SelectItem>
               <SelectItem value="live">Live</SelectItem>
-              <SelectItem value="paused">Paused</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="completed_provisional">Provisional</SelectItem>
               <SelectItem value="finalized">Finalized</SelectItem>
             </SelectContent>
           </Select>
@@ -302,7 +193,8 @@ export default function Matches() {
         ) : filteredMatches.length > 0 ? (
           <div className="space-y-4">
             {filteredMatches.map((match) => {
-              const { teamAScore: scoreA, teamBScore: scoreB } = getTeamScores(match);
+              const scoreB = match.score_b ?? match.runs_b ?? 0;
+              const scoreAValue = match.score_a ?? match.runs_a ?? 0;
 
               return (
                 <div
@@ -314,22 +206,37 @@ export default function Matches() {
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center gap-4">
                     {/* Sport & Event Info */}
-                    <div className="flex items-center gap-3 lg:w-48">
+                     <div className="flex items-center gap-3 lg:w-56">
                       <span className="text-2xl">{match.event_sport?.sport_category?.icon}</span>
                       <div>
                         <p className="font-medium">{match.event_sport?.sport_category?.name}</p>
                         <p className="text-xs text-muted-foreground truncate">
                           {match.event_sport?.event?.name}
                         </p>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {match.phase && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium">
+                              {match.phase}
+                            </span>
+                          )}
+                          {match.group_name && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                              Group {match.group_name}
+                            </span>
+                          )}
+                          {match.round && (
+                            <span className="text-xs text-muted-foreground">
+                              {match.round}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     {/* Teams & Score */}
                     <div className="flex-1 flex items-center justify-center gap-4">
                       <div className="text-right flex-1">
-                        <p className="font-semibold">
-                          {match.participant_a_name || match.participant_a?.name || match.team_a?.name || 'TBD'}
-                        </p>
+                        <p className="font-semibold">{match.team_a?.name || 'TBD'}</p>
                         <p className="text-xs text-muted-foreground">
                           {match.team_a?.university?.short_name}
                         </p>
@@ -339,16 +246,16 @@ export default function Matches() {
                         <span
                           className={cn(
                             'text-2xl font-display font-bold',
-                            scoreA > scoreB && 'text-accent'
+                            scoreAValue > scoreB && 'text-accent'
                           )}
                         >
-                          {scoreA}
+                          {scoreAValue}
                         </span>
                         <span className="text-muted-foreground">-</span>
                         <span
                           className={cn(
                             'text-2xl font-display font-bold',
-                            scoreB > scoreA && 'text-accent'
+                            scoreB > scoreAValue && 'text-accent'
                           )}
                         >
                           {scoreB}
@@ -356,9 +263,7 @@ export default function Matches() {
                       </div>
 
                       <div className="text-left flex-1">
-                        <p className="font-semibold">
-                          {match.participant_b_name || match.participant_b?.name || match.team_b?.name || 'TBD'}
-                        </p>
+                        <p className="font-semibold">{match.team_b?.name || 'TBD'}</p>
                         <p className="text-xs text-muted-foreground">
                           {match.team_b?.university?.short_name}
                         </p>
@@ -375,35 +280,19 @@ export default function Matches() {
                         </p>
                       </div>
 
-                      {/* Action buttons based on status and role */}
-                      {match.status === 'scheduled' && isStudentCoordinator && (
-                        <Button size="sm" onClick={() => handleStartMatch(match.id)}>
-                          <Play className="h-4 w-4 mr-1" />
-                          Start
+                      {/* Coordinator/Faculty: redirect to Score Control for live scoring */}
+                      {match.status === 'live' && isStudentCoordinator && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/coordinator/score-control?match=${match.id}`)}
+                        >
+                          <Edit2 className="h-4 w-4 mr-1" />
+                          Score
                         </Button>
                       )}
 
-                      {match.status === 'live' && isStudentCoordinator && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleOpenScoreDialog(match)}
-                          >
-                            <Edit2 className="h-4 w-4 mr-1" />
-                            Score
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => handleCompleteMatch(match.id)}
-                          >
-                            <Square className="h-4 w-4 mr-1" />
-                            End
-                          </Button>
-                        </>
-                      )}
-
-                      {match.status === 'completed' && role === 'faculty' && (
+                      {match.status === 'completed_provisional' && isFaculty && (
                         <Button
                           size="sm"
                           onClick={() => handleOpenFinalizeDialog(match)}
@@ -415,11 +304,25 @@ export default function Matches() {
                     </div>
                   </div>
 
-                  {match.venue && (
-                    <p className="text-xs text-muted-foreground mt-3 pt-3 border-t border-border">
-                      📍 {match.venue.name}
-                    </p>
-                  )}
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+                    {match.venue && (
+                      <p className="text-xs text-muted-foreground">📍 {match.venue.name}</p>
+                    )}
+                    {match.winner_team_id && match.status === 'finalized' && (
+                      <span className="text-xs font-semibold text-accent flex items-center gap-1">
+                        🏆 Winner: {match.winner_team_id === match.team_a_id ? match.team_a?.name : match.team_b?.name}
+                        {match.result_status === 'advanced' && (
+                          <span className="text-accent"> — ➡ Advanced</span>
+                        )}
+                      </span>
+                    )}
+                    {match.result_status === 'eliminated' && (
+                      <span className="text-xs text-destructive">❌ Eliminated</span>
+                    )}
+                    {match.result_status === 'draw' && (
+                      <span className="text-xs text-muted-foreground">🤝 Draw</span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -435,55 +338,7 @@ export default function Matches() {
         )}
       </div>
 
-      {/* Score Update Dialog */}
-      <Dialog open={isScoreDialogOpen} onOpenChange={setIsScoreDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Update Score</DialogTitle>
-            <DialogDescription>
-              Update the live score for this match
-            </DialogDescription>
-          </DialogHeader>
-          {selectedMatch && (
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>
-                    {selectedMatch.participant_a_name || selectedMatch.participant_a?.name || selectedMatch.team_a?.name || 'Participant A'}
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={teamAScore}
-                    onChange={(e) => setTeamAScore(parseInt(e.target.value) || 0)}
-                    className="text-2xl font-bold text-center"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>
-                    {selectedMatch.participant_b_name || selectedMatch.participant_b?.name || selectedMatch.team_b?.name || 'Participant B'}
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={teamBScore}
-                    onChange={(e) => setTeamBScore(parseInt(e.target.value) || 0)}
-                    className="text-2xl font-bold text-center"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsScoreDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateScore} disabled={updating}>
-              {updating ? 'Updating...' : 'Update Score'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
 
       {/* Finalize Dialog */}
       <Dialog open={isFinalizeDialogOpen} onOpenChange={setIsFinalizeDialogOpen}>
@@ -500,20 +355,16 @@ export default function Matches() {
                 <p className="text-sm text-muted-foreground mb-2">Final Score</p>
                 <div className="flex items-center justify-center gap-4">
                   <div>
-                    <p className="font-semibold">
-                      {selectedMatch.participant_a_name || selectedMatch.participant_a?.name || selectedMatch.team_a?.name}
-                    </p>
+                    <p className="font-semibold">{selectedMatch.team_a?.name}</p>
                     <p className="text-3xl font-display font-bold">
-                      {getTeamScores(selectedMatch).teamAScore}
+                      {selectedMatch.score_a != null ? selectedMatch.score_a : selectedMatch.runs_a ?? 0}
                     </p>
                   </div>
                   <span className="text-xl text-muted-foreground">vs</span>
                   <div>
-                    <p className="font-semibold">
-                      {selectedMatch.participant_b_name || selectedMatch.participant_b?.name || selectedMatch.team_b?.name}
-                    </p>
+                    <p className="font-semibold">{selectedMatch.team_b?.name}</p>
                     <p className="text-3xl font-display font-bold">
-                      {getTeamScores(selectedMatch).teamBScore}
+                      {selectedMatch.score_b != null ? selectedMatch.score_b : selectedMatch.runs_b ?? 0}
                     </p>
                   </div>
                 </div>

@@ -29,8 +29,6 @@ import type { FormField } from './FormFieldBuilder';
 
 interface PublishedForm {
   id: string;
-  event_id: string;
-  sport_id: string;
   type: string;
   status: string;
   deadline: string | null;
@@ -91,7 +89,7 @@ export default function StudentRegistrationView() {
     const { data } = await supabase
       .from('registration_submissions')
       .select('form_id')
-      .or(`user_id.eq.${user.id},submitted_by.eq.${user.id}`);
+      .eq('submitted_by', user.id);
 
     setMySubmissions(new Set((data || []).map(d => d.form_id)));
   };
@@ -136,11 +134,7 @@ export default function StudentRegistrationView() {
 
     const { error } = await supabase.from('registration_submissions').insert({
       form_id: selectedForm.id,
-      event_id: selectedForm.event_id,
-      sport_id: selectedForm.sport_id,
-      user_id: user.id,
       submitted_by: user.id,
-      status: 'approved',
       team_name: selectedForm.type === 'team' ? teamName : null,
       team_members: selectedForm.type === 'team'
         ? teamMembers.split('\n').filter(m => m.trim()).map(m => ({ name: m.trim() }))

@@ -233,6 +233,7 @@ export type Database = {
           registration_deadline: string | null
           start_date: string
           status: Database["public"]["Enums"]["event_status"]
+          tournament_type: string | null
           university_id: string
           updated_at: string
           venue: string | null
@@ -250,6 +251,7 @@ export type Database = {
           registration_deadline?: string | null
           start_date: string
           status?: Database["public"]["Enums"]["event_status"]
+          tournament_type?: string | null
           university_id: string
           updated_at?: string
           venue?: string | null
@@ -267,6 +269,7 @@ export type Database = {
           registration_deadline?: string | null
           start_date?: string
           status?: Database["public"]["Enums"]["event_status"]
+          tournament_type?: string | null
           university_id?: string
           updated_at?: string
           venue?: string | null
@@ -277,69 +280,6 @@ export type Database = {
             columns: ["university_id"]
             isOneToOne: false
             referencedRelation: "universities"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      group_standings: {
-        Row: {
-          created_at: string
-          draw: number
-          event_id: string
-          goal_difference: number
-          group_name: string
-          id: string
-          lost: number
-          net_run_rate: number
-          played: number
-          points: number
-          team_id: string
-          updated_at: string
-          won: number
-        }
-        Insert: {
-          created_at?: string
-          draw?: number
-          event_id: string
-          goal_difference?: number
-          group_name: string
-          id?: string
-          lost?: number
-          net_run_rate?: number
-          played?: number
-          points?: number
-          team_id: string
-          updated_at?: string
-          won?: number
-        }
-        Update: {
-          created_at?: string
-          draw?: number
-          event_id?: string
-          goal_difference?: number
-          group_name?: string
-          id?: string
-          lost?: number
-          net_run_rate?: number
-          played?: number
-          points?: number
-          team_id?: string
-          updated_at?: string
-          won?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "group_standings_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "group_standings_team_id_fkey"
-            columns: ["team_id"]
-            isOneToOne: false
-            referencedRelation: "teams"
             referencedColumns: ["id"]
           },
         ]
@@ -387,122 +327,144 @@ export type Database = {
       }
       matches: {
         Row: {
-          bracket_position: number | null
+          balls_a: number
+          balls_b: number
+          batting_team_id: string | null
+          bowling_team_id: string | null
           completed_at: string | null
           created_at: string
           created_by: string | null
           current_editor_id: string | null
-          end_time: string | null
-          event_id: string | null
           editor_locked_at: string | null
           event_sport_id: string
           finalized_at: string | null
           finalized_by: string | null
           group_name: string | null
           id: string
+          innings: number
           match_number: number | null
+          match_phase: string | null
           next_match_id: string | null
-          participant_a_name: string | null
-          participant_a_id: string | null
-          participant_b_name: string | null
-          participant_b_id: string | null
+          next_slot: string | null
+          penalty_a: number | null
+          penalty_b: number | null
           phase: string | null
-          round: number | null
+          result_status: string | null
+          round: string | null
           round_number: number | null
-          score_data: Json
+          runs_a: number
+          runs_b: number
           scheduled_at: string
-          sport_id: string | null
-          start_time: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["match_status"]
+          target_score: number | null
           team_a_id: string | null
           team_b_id: string | null
+          toss_decision: string | null
+          toss_winner_id: string | null
           updated_at: string
           venue_id: string | null
-          winner_id: string | null
-          winner_name: string | null
-          winner_participant_id: string | null
+          wickets_a: number
+          wickets_b: number
+          winner_team_id: string | null
         }
         Insert: {
-          bracket_position?: number | null
+          balls_a?: number
+          balls_b?: number
+          batting_team_id?: string | null
+          bowling_team_id?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
           current_editor_id?: string | null
-          end_time?: string | null
-          event_id?: string | null
           editor_locked_at?: string | null
           event_sport_id: string
           finalized_at?: string | null
           finalized_by?: string | null
           group_name?: string | null
           id?: string
+          innings?: number
           match_number?: number | null
+          match_phase?: string | null
           next_match_id?: string | null
-          participant_a_name?: string | null
-          participant_a_id?: string | null
-          participant_b_name?: string | null
-          participant_b_id?: string | null
+          next_slot?: string | null
+          penalty_a?: number | null
+          penalty_b?: number | null
           phase?: string | null
-          round?: number | null
+          result_status?: string | null
+          round?: string | null
           round_number?: number | null
-          score_data?: Json
+          runs_a?: number
+          runs_b?: number
           scheduled_at: string
-          sport_id?: string | null
-          start_time?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["match_status"]
+          target_score?: number | null
           team_a_id?: string | null
           team_b_id?: string | null
+          toss_decision?: string | null
+          toss_winner_id?: string | null
           updated_at?: string
           venue_id?: string | null
-          winner_id?: string | null
-          winner_name?: string | null
-          winner_participant_id?: string | null
+          wickets_a?: number
+          wickets_b?: number
+          winner_team_id?: string | null
         }
         Update: {
-          bracket_position?: number | null
+          balls_a?: number
+          balls_b?: number
+          batting_team_id?: string | null
+          bowling_team_id?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
           current_editor_id?: string | null
-          end_time?: string | null
-          event_id?: string | null
           editor_locked_at?: string | null
           event_sport_id?: string
           finalized_at?: string | null
           finalized_by?: string | null
           group_name?: string | null
           id?: string
+          innings?: number
           match_number?: number | null
+          match_phase?: string | null
           next_match_id?: string | null
-          participant_a_name?: string | null
-          participant_a_id?: string | null
-          participant_b_name?: string | null
-          participant_b_id?: string | null
+          next_slot?: string | null
+          penalty_a?: number | null
+          penalty_b?: number | null
           phase?: string | null
-          round?: number | null
+          result_status?: string | null
+          round?: string | null
           round_number?: number | null
-          score_data?: Json
+          runs_a?: number
+          runs_b?: number
           scheduled_at?: string
-          sport_id?: string | null
-          start_time?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["match_status"]
+          target_score?: number | null
           team_a_id?: string | null
           team_b_id?: string | null
+          toss_decision?: string | null
+          toss_winner_id?: string | null
           updated_at?: string
           venue_id?: string | null
-          winner_id?: string | null
-          winner_name?: string | null
-          winner_participant_id?: string | null
+          wickets_a?: number
+          wickets_b?: number
+          winner_team_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "matches_event_id_fkey"
-            columns: ["event_id"]
+            foreignKeyName: "matches_batting_team_id_fkey"
+            columns: ["batting_team_id"]
             isOneToOne: false
-            referencedRelation: "events"
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matches_bowling_team_id_fkey"
+            columns: ["bowling_team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
             referencedColumns: ["id"]
           },
           {
@@ -520,27 +482,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "matches_participant_a_id_fkey"
-            columns: ["participant_a_id"]
-            isOneToOne: false
-            referencedRelation: "participants"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "matches_participant_b_id_fkey"
-            columns: ["participant_b_id"]
-            isOneToOne: false
-            referencedRelation: "participants"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "matches_sport_id_fkey"
-            columns: ["sport_id"]
-            isOneToOne: false
-            referencedRelation: "sports_categories"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "matches_team_a_id_fkey"
             columns: ["team_a_id"]
             isOneToOne: false
@@ -555,6 +496,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "matches_toss_winner_id_fkey"
+            columns: ["toss_winner_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "matches_venue_id_fkey"
             columns: ["venue_id"]
             isOneToOne: false
@@ -562,59 +510,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "matches_winner_id_fkey"
-            columns: ["winner_id"]
+            foreignKeyName: "matches_winner_team_id_fkey"
+            columns: ["winner_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "matches_winner_participant_id_fkey"
-            columns: ["winner_participant_id"]
-            isOneToOne: false
-            referencedRelation: "participants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      participants: {
-        Row: {
-          created_at: string
-          event_id: string
-          id: string
-          name: string
-          sport_id: string
-          type: string
-        }
-        Insert: {
-          created_at?: string
-          event_id: string
-          id?: string
-          name: string
-          sport_id: string
-          type: string
-        }
-        Update: {
-          created_at?: string
-          event_id?: string
-          id?: string
-          name?: string
-          sport_id?: string
-          type?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "participants_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "participants_sport_id_fkey"
-            columns: ["sport_id"]
-            isOneToOne: false
-            referencedRelation: "sports_categories"
             referencedColumns: ["id"]
           },
         ]
@@ -712,79 +611,37 @@ export type Database = {
       registration_submissions: {
         Row: {
           created_at: string
-          event_id: string
           form_id: string
           id: string
-          reviewed_at: string | null
-          reviewed_by: string | null
           submission_data: Json
-          sport_id: string
-          status: Database["public"]["Enums"]["registration_status"]
           submitted_by: string
-          team_id: string | null
           team_members: Json | null
           team_name: string | null
-          user_id: string
         }
         Insert: {
           created_at?: string
-          event_id: string
           form_id: string
           id?: string
-          reviewed_at?: string | null
-          reviewed_by?: string | null
           submission_data?: Json
-          sport_id: string
-          status?: Database["public"]["Enums"]["registration_status"]
           submitted_by: string
-          team_id?: string | null
           team_members?: Json | null
           team_name?: string | null
-          user_id: string
         }
         Update: {
           created_at?: string
-          event_id?: string
           form_id?: string
           id?: string
-          reviewed_at?: string | null
-          reviewed_by?: string | null
           submission_data?: Json
-          sport_id?: string
-          status?: Database["public"]["Enums"]["registration_status"]
           submitted_by?: string
-          team_id?: string | null
           team_members?: Json | null
           team_name?: string | null
-          user_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "registration_submissions_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "registration_submissions_form_id_fkey"
             columns: ["form_id"]
             isOneToOne: false
             referencedRelation: "registration_forms"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "registration_submissions_sport_id_fkey"
-            columns: ["sport_id"]
-            isOneToOne: false
-            referencedRelation: "sports_categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "registration_submissions_team_id_fkey"
-            columns: ["team_id"]
-            isOneToOne: false
-            referencedRelation: "teams"
             referencedColumns: ["id"]
           },
         ]
@@ -1060,6 +917,79 @@ export type Database = {
           },
         ]
       }
+      team_standings: {
+        Row: {
+          created_at: string
+          draw: number
+          event_id: string
+          event_sport_id: string
+          goal_difference: number
+          group_name: string | null
+          id: string
+          lost: number
+          played: number
+          points: number
+          team_id: string
+          team_name: string
+          updated_at: string
+          won: number
+        }
+        Insert: {
+          created_at?: string
+          draw?: number
+          event_id: string
+          event_sport_id: string
+          goal_difference?: number
+          group_name?: string | null
+          id?: string
+          lost?: number
+          played?: number
+          points?: number
+          team_id: string
+          team_name: string
+          updated_at?: string
+          won?: number
+        }
+        Update: {
+          created_at?: string
+          draw?: number
+          event_id?: string
+          event_sport_id?: string
+          goal_difference?: number
+          group_name?: string | null
+          id?: string
+          lost?: number
+          played?: number
+          points?: number
+          team_id?: string
+          team_name?: string
+          updated_at?: string
+          won?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_standings_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_standings_event_sport_id_fkey"
+            columns: ["event_sport_id"]
+            isOneToOne: false
+            referencedRelation: "event_sports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_standings_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teams: {
         Row: {
           approved_at: string | null
@@ -1067,11 +997,9 @@ export type Database = {
           captain_id: string | null
           created_at: string
           created_by: string | null
-          event_id: string | null
           event_sport_id: string
           id: string
           name: string
-          sport_id: string | null
           status: Database["public"]["Enums"]["team_status"]
           university_id: string | null
           updated_at: string
@@ -1082,11 +1010,9 @@ export type Database = {
           captain_id?: string | null
           created_at?: string
           created_by?: string | null
-          event_id?: string | null
           event_sport_id: string
           id?: string
           name: string
-          sport_id?: string | null
           status?: Database["public"]["Enums"]["team_status"]
           university_id?: string | null
           updated_at?: string
@@ -1097,35 +1023,19 @@ export type Database = {
           captain_id?: string | null
           created_at?: string
           created_by?: string | null
-          event_id?: string | null
           event_sport_id?: string
           id?: string
           name?: string
-          sport_id?: string | null
           status?: Database["public"]["Enums"]["team_status"]
           university_id?: string | null
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "teams_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "teams_event_sport_id_fkey"
             columns: ["event_sport_id"]
             isOneToOne: false
             referencedRelation: "event_sports"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "teams_sport_id_fkey"
-            columns: ["sport_id"]
-            isOneToOne: false
-            referencedRelation: "sports_categories"
             referencedColumns: ["id"]
           },
           {
@@ -1249,6 +1159,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_cricket_score_action: {
+        Args: { _action: string; _match_id: string }
+        Returns: {
+          out_balls_a: number
+          out_balls_b: number
+          out_innings: number
+          out_match_phase: string
+          out_runs_a: number
+          out_runs_b: number
+          out_target_score: number
+          out_wickets_a: number
+          out_wickets_b: number
+        }[]
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
@@ -1282,8 +1206,6 @@ export type Database = {
       match_status:
         | "scheduled"
         | "live"
-        | "completed"
-        | "paused"
         | "completed_provisional"
         | "finalized"
         | "cancelled"
@@ -1436,8 +1358,6 @@ export const Constants = {
       match_status: [
         "scheduled",
         "live",
-        "completed",
-        "paused",
         "completed_provisional",
         "finalized",
         "cancelled",

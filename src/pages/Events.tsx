@@ -7,6 +7,9 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Event, University } from '@/types/database';
+import MatchGenerator from '@/components/tournament/MatchGenerator';
+import DemoTeamGenerator from '@/components/tournament/DemoTeamGenerator';
+import TournamentReset from '@/components/tournament/TournamentReset';
 import {
   Dialog,
   DialogContent,
@@ -26,10 +29,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Plus, Search, Calendar, MapPin, Eye, Edit, CheckCircle, Wand2 } from 'lucide-react';
+import { Plus, Search, Calendar, MapPin, Users, Eye, Edit, CheckCircle, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TournamentService } from '@/services/TournamentService';
 
 export default function Events() {
   const navigate = useNavigate();
@@ -41,7 +43,6 @@ export default function Events() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [generatingEventId, setGeneratingEventId] = useState<string | null>(null);
 
   // New event form state
   const [newEvent, setNewEvent] = useState({
@@ -137,19 +138,6 @@ export default function Events() {
     } else {
       toast.success('Event approved');
       fetchEvents();
-    }
-  };
-
-  const handleGenerateMatches = async (eventId: string) => {
-    setGeneratingEventId(eventId);
-    try {
-      const generated = await TournamentService.generateMatches(eventId);
-      toast.success(`Generated ${generated} matches.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to generate matches';
-      toast.error(message);
-    } finally {
-      setGeneratingEventId(null);
     }
   };
 
@@ -350,7 +338,7 @@ export default function Events() {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 pt-2 border-t border-border">
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -398,16 +386,26 @@ export default function Events() {
                         Publish
                       </Button>
                     )}
-                    {isAdmin && ['approved', 'active'].includes(event.status) && (
+                    {isAdmin && (event.status === 'approved' || event.status === 'active') && (
+                      <>
+                        <DemoTeamGenerator event={event} onGenerated={fetchEvents} />
+                        <MatchGenerator event={event} onGenerated={fetchEvents} />
+                        <TournamentReset event={event} onReset={fetchEvents} />
+                      </>
+                    )}
+                    {event.tournament_type && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={generatingEventId === event.id}
-                        onClick={() => handleGenerateMatches(event.id)}
+                        onClick={() => navigate(`/admin/bracket/${event.id}`)}
                       >
-                        <Wand2 className="h-4 w-4 mr-1" />
-                        {generatingEventId === event.id ? 'Generating...' : 'Generate Matches'}
+                        🏆 Bracket
                       </Button>
+                    )}
+                    {event.tournament_type && (
+                      <span className="text-xs px-2 py-1 rounded-full bg-accent/10 text-accent font-medium capitalize">
+                        {event.tournament_type}
+                      </span>
                     )}
                   </div>
                 </div>

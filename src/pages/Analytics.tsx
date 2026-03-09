@@ -10,6 +10,7 @@ import {
   Target, 
   Trophy, 
   DollarSign, 
+  TrendingUp,
   BarChart3,
   PieChart
 } from 'lucide-react';
@@ -35,10 +36,10 @@ export default function Analytics() {
   const [stats, setStats] = useState({
     totalEvents: 0,
     totalParticipants: 0,
-    totalTeams: 0,
     totalMatches: 0,
     completedMatches: 0,
     totalBudget: 0,
+    approvedBudget: 0,
   });
   const [sportParticipation, setSportParticipation] = useState<{ name: string; value: number }[]>([]);
   const [matchesByStatus, setMatchesByStatus] = useState<{ name: string; count: number }[]>([]);
@@ -55,39 +56,33 @@ export default function Analytics() {
     // Fetch counts
     const [eventsRes, registrationsRes, matchesRes, budgetsRes, sportsRes] = await Promise.all([
       supabase.from('events').select('id, status', { count: 'exact' }),
-      supabase
-        .from('registration_submissions')
-        .select('id, sport_id, team_name', { count: 'exact' }),
+      supabase.from('registrations').select('id', { count: 'exact' }),
       supabase.from('matches').select('id, status', { count: 'exact' }),
       supabase.from('budgets').select('id, status, estimated_amount'),
       supabase
-        .from('sports_categories')
-        .select('id, name')
+        .from('registrations')
+        .select('event_sport:event_sports(sport_category:sports_categories(name))')
     ]);
 
-    const completedMatches =
-      matchesRes.data?.filter((m) => ['completed', 'finalized', 'completed_provisional'].includes(m.status)).length || 0;
+    const completedMatches = matchesRes.data?.filter(m => m.status === 'finalized').length || 0;
     const totalBudget = budgetsRes.data?.reduce((sum, b) => sum + (b.estimated_amount || 0), 0) || 0;
-    const distinctTeamNames = new Set<string>();
-    registrationsRes.data?.forEach((submission) => {
-      const teamName = submission.team_name?.trim();
-      if (teamName) distinctTeamNames.add(teamName);
-    });
+    const approvedBudget = budgetsRes.data
+      ?.filter(b => b.status === 'approved')
+      .reduce((sum, b) => sum + (b.estimated_amount || 0), 0) || 0;
 
     setStats({
       totalEvents: eventsRes.count || 0,
       totalParticipants: registrationsRes.count || 0,
-      totalTeams: distinctTeamNames.size,
       totalMatches: matchesRes.count || 0,
       completedMatches,
       totalBudget,
+      approvedBudget,
     });
 
     // Sport participation breakdown
-    const sportsMap = new Map((sportsRes.data || []).map((sport) => [sport.id, sport.name]));
     const sportCounts: Record<string, number> = {};
-    registrationsRes.data?.forEach((submission) => {
-      const sportName = sportsMap.get(submission.sport_id);
+    sportsRes.data?.forEach((reg: any) => {
+      const sportName = reg.event_sport?.sport_category?.name;
       if (sportName) {
         sportCounts[sportName] = (sportCounts[sportName] || 0) + 1;
       }
@@ -165,11 +160,6 @@ export default function Analytics() {
               icon={Users}
             />
             <StatsCard
-              title="Total Teams"
-              value={stats.totalTeams}
-              icon={Users}
-            />
-            <StatsCard
               title="Total Matches"
               value={stats.totalMatches}
               icon={Target}
@@ -184,6 +174,12 @@ export default function Analytics() {
               title="Total Budget"
               value={formatCurrency(stats.totalBudget)}
               icon={DollarSign}
+            />
+            <StatsCard
+              title="Approved Budget"
+              value={formatCurrency(stats.approvedBudget)}
+              icon={TrendingUp}
+              description={`${((stats.approvedBudget / stats.totalBudget) * 100 || 0).toFixed(0)}% of total`}
             />
           </div>
         )}

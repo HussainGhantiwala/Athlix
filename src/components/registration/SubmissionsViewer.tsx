@@ -4,7 +4,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Select,
   SelectContent,
@@ -26,9 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Download, Eye, ClipboardList } from 'lucide-react';
+import { Download, Eye, ClipboardList, Users, User } from 'lucide-react';
 import type { FormField } from './FormFieldBuilder';
-import { toast } from 'sonner';
 
 interface FormOption {
   id: string;
@@ -41,36 +39,30 @@ interface FormOption {
 interface Submission {
   id: string;
   form_id: string;
-  user_id: string | null;
   submitted_by: string;
-  status: 'pending' | 'approved' | 'rejected';
-  team_id: string | null;
   team_name: string | null;
   team_members: { name: string }[] | null;
   submission_data: Record<string, any>;
   created_at: string;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
   profile?: { full_name: string; email: string } | null;
 }
 
 export default function SubmissionsViewer() {
-  const { role, user } = useAuth();
+  const { role } = useAuth();
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<FormOption[]>([]);
   const [selectedFormId, setSelectedFormId] = useState<string>('');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [detailSubmission, setDetailSubmission] = useState<Submission | null>(null);
-  const [updatingSubmissionId, setUpdatingSubmissionId] = useState<string | null>(null);
+
+  const basePath = role === 'admin' ? '/admin' : '/coordinator';
 
   useEffect(() => {
-    void fetchForms();
+    fetchForms();
   }, []);
 
   useEffect(() => {
-    if (selectedFormId) {
-      void fetchSubmissions();
-    }
+    if (selectedFormId) fetchSubmissions();
   }, [selectedFormId]);
 
   const fetchForms = async () => {
@@ -92,27 +84,24 @@ export default function SubmissionsViewer() {
   const fetchSubmissions = async () => {
     const { data } = await supabase
       .from('registration_submissions')
-      .select('*')
+      .select(`
+        *
+      `)
       .eq('form_id', selectedFormId)
       .order('created_at', { ascending: false });
 
+    // Fetch profiles separately for each submission
     const subs = (data || []) as unknown as Submission[];
     if (subs.length > 0) {
-      const userIds = [
-        ...new Set(
-          subs
-            .map((s) => s.user_id || s.submitted_by)
-            .filter((value): value is string => Boolean(value))
-        ),
-      ];
+      const userIds = [...new Set(subs.map(s => s.submitted_by))];
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, full_name, email')
         .in('id', userIds);
-
-      const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
+      
+      const profileMap = new Map((profiles || []).map(p => [p.id, p]));
       for (const sub of subs) {
-        const p = profileMap.get(sub.user_id || sub.submitted_by);
+        const p = profileMap.get(sub.submitted_by);
         if (p) sub.profile = { full_name: p.full_name, email: p.email };
       }
     }
@@ -120,33 +109,8 @@ export default function SubmissionsViewer() {
     setSubmissions(subs);
   };
 
-  const handleUpdateSubmissionStatus = async (
-    submission: Submission,
-    status: 'approved' | 'rejected'
-  ) => {
-    setUpdatingSubmissionId(submission.id);
-    const { error } = await supabase
-      .from('registration_submissions')
-      .update({
-        status,
-        reviewed_by: user?.id ?? null,
-        reviewed_at: new Date().toISOString(),
-      } as any)
-      .eq('id', submission.id);
-
-    setUpdatingSubmissionId(null);
-    if (error) {
-      toast.error(`Failed to ${status} submission`);
-      return;
-    }
-
-    toast.success(`Submission ${status}`);
-    await fetchSubmissions();
-  };
-
-  const selectedForm = forms.find((f) => f.id === selectedFormId);
+  const selectedForm = forms.find(f => f.id === selectedFormId);
   const schema: FormField[] = Array.isArray(selectedForm?.form_schema) ? selectedForm.form_schema : [];
-  const canReview = role === 'admin' || role === 'faculty' || role === 'student_coordinator';
 
   const exportCSV = () => {
     if (submissions.length === 0) return;
@@ -156,28 +120,25 @@ export default function SubmissionsViewer() {
       'Name',
       'Email',
       ...(isTeam ? ['Team Name', 'Team Members'] : []),
-      ...schema.map((f) => f.label || 'Untitled'),
-      'Status',
+      ...schema.map(f => f.label || 'Untitled'),
       'Submitted At',
     ];
 
-    const rows = submissions.map((sub) => [
+    const rows = submissions.map(sub => [
       sub.profile?.full_name || '',
       sub.profile?.email || '',
-      ...(isTeam
-        ? [sub.team_name || '', (sub.team_members || []).map((m) => m.name).join('; ')]
-        : []),
-      ...schema.map((f) => {
+      ...(isTeam ? [
+        sub.team_name || '',
+        (sub.team_members || []).map(m => m.name).join('; '),
+      ] : []),
+      ...schema.map(f => {
         const val = sub.submission_data?.[f.id];
         return typeof val === 'boolean' ? (val ? 'Yes' : 'No') : String(val || '');
       }),
-      sub.status,
       new Date(sub.created_at).toLocaleString(),
     ]);
 
-    const csv = [headers, ...rows]
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
+    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -193,7 +154,7 @@ export default function SubmissionsViewer() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl lg:text-3xl font-display font-bold">Registration Submissions</h1>
-            <p className="text-muted-foreground">View and approve participants</p>
+            <p className="text-muted-foreground">View and export registered participants</p>
           </div>
           <Button variant="outline" onClick={exportCSV} disabled={submissions.length === 0}>
             <Download className="h-4 w-4 mr-2" />
@@ -201,21 +162,23 @@ export default function SubmissionsViewer() {
           </Button>
         </div>
 
+        {/* Form selector */}
         <div className="max-w-sm">
           <Select value={selectedFormId} onValueChange={setSelectedFormId}>
             <SelectTrigger>
               <SelectValue placeholder="Select a form" />
             </SelectTrigger>
             <SelectContent>
-              {forms.map((f) => (
+              {forms.map(f => (
                 <SelectItem key={f.id} value={f.id}>
-                  {f.sport?.icon} {f.sport?.name} - {f.event?.name}
+                  {f.sport?.icon} {f.sport?.name} — {f.event?.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
+        {/* Submissions table */}
         {loading ? (
           <Skeleton className="h-64 rounded-xl" />
         ) : submissions.length > 0 ? (
@@ -232,32 +195,31 @@ export default function SubmissionsViewer() {
                         <TableHead>Members</TableHead>
                       </>
                     )}
-                    {schema.slice(0, 3).map((f) => (
+                    {schema.slice(0, 3).map(f => (
                       <TableHead key={f.id}>{f.label || 'Untitled'}</TableHead>
                     ))}
                     <TableHead>Submitted</TableHead>
-                    <TableHead>Status</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {submissions.map((sub) => (
+                  {submissions.map(sub => (
                     <TableRow key={sub.id}>
                       <TableCell className="font-medium">{sub.profile?.full_name}</TableCell>
                       <TableCell className="text-muted-foreground">{sub.profile?.email}</TableCell>
                       {selectedForm?.type === 'team' && (
                         <>
-                          <TableCell>{sub.team_name || '-'}</TableCell>
+                          <TableCell>{sub.team_name}</TableCell>
                           <TableCell className="text-sm">
                             {(sub.team_members || []).length} members
                           </TableCell>
                         </>
                       )}
-                      {schema.slice(0, 3).map((f) => (
+                      {schema.slice(0, 3).map(f => (
                         <TableCell key={f.id} className="text-sm">
                           {(() => {
                             const val = sub.submission_data?.[f.id];
-                            return typeof val === 'boolean' ? (val ? 'Yes' : 'No') : String(val || '-');
+                            return typeof val === 'boolean' ? (val ? 'Yes' : 'No') : String(val || '—');
                           })()}
                         </TableCell>
                       ))}
@@ -265,33 +227,9 @@ export default function SubmissionsViewer() {
                         {new Date(sub.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={sub.status as any} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {canReview && sub.status === 'pending' && (
-                            <>
-                              <Button
-                                size="sm"
-                                disabled={updatingSubmissionId === sub.id}
-                                onClick={() => handleUpdateSubmissionStatus(sub, 'approved')}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={updatingSubmissionId === sub.id}
-                                onClick={() => handleUpdateSubmissionStatus(sub, 'rejected')}
-                              >
-                                Reject
-                              </Button>
-                            </>
-                          )}
-                          <Button size="sm" variant="ghost" onClick={() => setDetailSubmission(sub)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button size="sm" variant="ghost" onClick={() => setDetailSubmission(sub)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -308,6 +246,7 @@ export default function SubmissionsViewer() {
         ) : null}
       </div>
 
+      {/* Detail Dialog */}
       <Dialog open={!!detailSubmission} onOpenChange={(open) => !open && setDetailSubmission(null)}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -329,7 +268,7 @@ export default function SubmissionsViewer() {
               <>
                 <div>
                   <p className="text-xs text-muted-foreground">Team Name</p>
-                  <p className="font-medium">{detailSubmission.team_name || '-'}</p>
+                  <p className="font-medium">{detailSubmission.team_name}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Team Members</p>
@@ -342,24 +281,19 @@ export default function SubmissionsViewer() {
               </>
             )}
 
-            {schema.map((field) => (
+            {schema.map(field => (
               <div key={field.id}>
                 <p className="text-xs text-muted-foreground">{field.label || 'Untitled'}</p>
                 <p className="font-medium">
                   {(() => {
                     const val = detailSubmission?.submission_data?.[field.id];
-                    if (val === undefined || val === null || val === '') return '-';
+                    if (val === undefined || val === null || val === '') return '—';
                     if (typeof val === 'boolean') return val ? 'Yes' : 'No';
                     return String(val);
                   })()}
                 </p>
               </div>
             ))}
-
-            <div>
-              <p className="text-xs text-muted-foreground">Status</p>
-              <StatusBadge status={(detailSubmission?.status || 'pending') as any} />
-            </div>
 
             <div>
               <p className="text-xs text-muted-foreground">Submitted At</p>

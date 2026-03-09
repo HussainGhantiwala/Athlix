@@ -94,7 +94,7 @@ export default function AdminReports() {
           winner:teams!matches_winner_id_fkey(name)
         `)
         .eq('status', 'finalized')
-        .eq('phase', 'knockout')
+        .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final'])
         .eq('round', 'final')
         .not('winner_id', 'is', null),
       supabase

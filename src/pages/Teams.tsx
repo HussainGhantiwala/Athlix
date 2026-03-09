@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -27,11 +27,12 @@ import {
 } from '@/components/ui/select';
 
 export default function Teams() {
-  const { user, isAdmin, isFaculty } = useAuth();
+  const { user, isFaculty } = useAuth();
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<Team[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sportFilter, setSportFilter] = useState<string>('all');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -43,16 +44,16 @@ export default function Teams() {
 
   const fetchTeams = async () => {
     setLoading(true);
+
     let query = supabase
       .from('teams')
       .select(`
-        *,
+        id, name, status, captain_id, university_id, event_sport_id, created_at,
         university:universities(name, short_name),
         event_sport:event_sports(
           sport_category:sports_categories(name, icon),
-          event:events(name, status)
-        ),
-        submissions:registration_submissions!registration_submissions_team_id_fkey(id, status, event_id, sport_id)
+          event:events(name)
+        )
       `)
       .order('created_at', { ascending: false });
 
@@ -64,19 +65,9 @@ export default function Teams() {
     if (error) {
       toast.error('Failed to fetch teams');
     } else {
-      const allTeams = ((data as unknown as Team[]) || []) as any[];
-      const filteredTeams = isAdmin
-        ? allTeams.filter((team) => {
-            const hasApprovedSubmission = (team.submissions || []).some(
-              (submission: any) => submission.status === 'approved'
-            );
-            const eventStatus = team.event_sport?.event?.status;
-            const eventIsApproved = ['approved', 'active', 'completed'].includes(eventStatus || '');
-            return hasApprovedSubmission && eventIsApproved;
-          })
-        : allTeams;
-      setTeams(filteredTeams as unknown as Team[]);
+      setTeams((data as unknown as Team[]) || []);
     }
+
     setLoading(false);
   };
 
@@ -94,6 +85,7 @@ export default function Teams() {
     if (!error) {
       setTeamMembers((data as unknown as TeamMember[]) || []);
     }
+
     setLoadingMembers(false);
   };
 
@@ -135,21 +127,47 @@ export default function Teams() {
     }
   };
 
-  const filteredTeams = teams.filter((team) =>
-    team.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    team.university?.name?.toLowerCase().includes(searchQuery.toLowerCase())
+  const getSportName = (team: Team) => ((team as any).event_sport?.sport_category?.name || 'Unknown Sport');
+
+  const filteredTeams = teams.filter((team) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      team.name.toLowerCase().includes(q) ||
+      team.university?.name?.toLowerCase().includes(q) ||
+      getSportName(team).toLowerCase().includes(q)
+    );
+  });
+
+  const sportOptions = useMemo(
+    () =>
+      Array.from(new Set(teams.map((team) => getSportName(team))))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
+    [teams]
   );
+
+  const groupedTeams = useMemo(() => {
+    const grouped: Record<string, Team[]> = {};
+
+    filteredTeams
+      .filter((team) => sportFilter === 'all' || getSportName(team) === sportFilter)
+      .forEach((team) => {
+        const sportName = getSportName(team);
+        if (!grouped[sportName]) grouped[sportName] = [];
+        grouped[sportName].push(team);
+      });
+
+    return Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filteredTeams, sportFilter]);
 
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
-        {/* Header */}
         <div>
           <h1 className="text-2xl lg:text-3xl font-display font-bold">Teams</h1>
           <p className="text-muted-foreground">Manage team formations and approvals</p>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -160,6 +178,7 @@ export default function Teams() {
               className="pl-10"
             />
           </div>
+
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-40">
               <SelectValue placeholder="Status" />
@@ -172,60 +191,86 @@ export default function Teams() {
               <SelectItem value="locked">Locked</SelectItem>
             </SelectContent>
           </Select>
+
+          <Select value={sportFilter} onValueChange={setSportFilter}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Sport" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Sports</SelectItem>
+              {sportOptions.map((sport) => (
+                <SelectItem key={sport} value={sport}>
+                  {sport}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Teams Grid */}
         {loading ? (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[...Array(6)].map((_, i) => (
               <Skeleton key={i} className="h-48 rounded-xl" />
             ))}
           </div>
-        ) : filteredTeams.length > 0 ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredTeams.map((team) => (
-              <div key={team.id} className="dashboard-card p-4 space-y-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">
-                      {(team as any).event_sport?.sport_category?.icon || '🏆'}
+        ) : groupedTeams.length > 0 ? (
+          <div className="space-y-8">
+            {groupedTeams.map(([sportName, sportTeams]) => (
+              <section key={sportName} className="space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+                    {sportName}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {sportTeams.length} Team{sportTeams.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {sportTeams.map((team) => (
+                    <div key={team.id} className="dashboard-card p-4 space-y-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-lg bg-accent/10 flex items-center justify-center text-2xl">
+                            {(team as any).event_sport?.sport_category?.icon || 'T'}
+                          </div>
+                          <div>
+                            <h3 className="font-semibold">{team.name}</h3>
+                            <p className="text-sm text-muted-foreground">{team.university?.short_name}</p>
+                          </div>
+                        </div>
+                        <StatusBadge status={team.status} />
+                      </div>
+
+                      <div className="text-sm text-muted-foreground">
+                        <p>{(team as any).event_sport?.sport_category?.name}</p>
+                        <p className="truncate">{(team as any).event_sport?.event?.name}</p>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 border-t border-border">
+                        <Button variant="ghost" size="sm" onClick={() => handleViewTeam(team)}>
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Button>
+
+                        {team.status === 'pending_approval' && isFaculty && (
+                          <Button size="sm" onClick={() => handleApproveTeam(team.id)}>
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Approve
+                          </Button>
+                        )}
+
+                        {team.status === 'approved' && isFaculty && (
+                          <Button size="sm" variant="outline" onClick={() => handleLockTeam(team.id)}>
+                            <Lock className="h-4 w-4 mr-1" />
+                            Lock
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-semibold">{team.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {team.university?.short_name}
-                      </p>
-                    </div>
-                  </div>
-                  <StatusBadge status={team.status} />
+                  ))}
                 </div>
-
-                <div className="text-sm text-muted-foreground">
-                  <p>{(team as any).event_sport?.sport_category?.name}</p>
-                  <p className="truncate">{(team as any).event_sport?.event?.name}</p>
-                </div>
-
-                <div className="flex items-center justify-between pt-3 border-t border-border">
-                  <Button variant="ghost" size="sm" onClick={() => handleViewTeam(team)}>
-                    <Eye className="h-4 w-4 mr-1" />
-                    View
-                  </Button>
-
-                  {team.status === 'pending_approval' && isFaculty && (
-                    <Button size="sm" onClick={() => handleApproveTeam(team.id)}>
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Approve
-                    </Button>
-                  )}
-
-                  {team.status === 'approved' && isFaculty && (
-                    <Button size="sm" variant="outline" onClick={() => handleLockTeam(team.id)}>
-                      <Lock className="h-4 w-4 mr-1" />
-                      Lock
-                    </Button>
-                  )}
-                </div>
-              </div>
+              </section>
             ))}
           </div>
         ) : (
@@ -239,7 +284,6 @@ export default function Teams() {
         )}
       </div>
 
-      {/* Team Detail Dialog */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -248,7 +292,7 @@ export default function Teams() {
               {selectedTeam?.name}
             </DialogTitle>
             <DialogDescription>
-              {selectedTeam?.university?.name} • {(selectedTeam as any)?.event_sport?.sport_category?.name}
+              {selectedTeam?.university?.name} - {(selectedTeam as any)?.event_sport?.sport_category?.name}
             </DialogDescription>
           </DialogHeader>
 
@@ -267,10 +311,7 @@ export default function Teams() {
             ) : teamMembers.length > 0 ? (
               <div className="space-y-3">
                 {teamMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-muted/50"
-                  >
+                  <div key={member.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={(member as any).profile?.avatar_url} />
                       <AvatarFallback>
@@ -288,7 +329,7 @@ export default function Teams() {
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {member.position || 'Player'}
-                        {member.jersey_number && ` • #${member.jersey_number}`}
+                        {member.jersey_number && ` - #${member.jersey_number}`}
                       </p>
                     </div>
                   </div>

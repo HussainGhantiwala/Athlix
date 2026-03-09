@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { BookOpen, FileText } from 'lucide-react';
+import { BookOpen, Download, FileText } from 'lucide-react';
 
 interface RuleBook {
   id: string;
@@ -61,17 +62,18 @@ export default function RuleBookViewer() {
                     </p>
                   </div>
                   {book.pdf_url && (
-                    <a
-                      href={book.pdf_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
-                      className="flex items-center gap-1 text-sm text-primary hover:underline"
-                      onClick={(e) => e.stopPropagation()}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(book.pdf_url!, '_blank');
+                      }}
                     >
-                      <FileText className="h-4 w-4" />
-                      Download Rule Book
-                    </a>
+                      <Download className="h-4 w-4 mr-1.5" />
+                      Download PDF
+                    </Button>
                   )}
                 </button>
                 {expanded === book.id && (
