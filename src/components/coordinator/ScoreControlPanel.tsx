@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+﻿import { useEffect, useState, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -53,7 +53,7 @@ export default function ScoreControlPanel() {
         // Also update the selected match if it's the one being updated (keeps dialog in sync)
         setSelectedMatch(prev => prev && prev.id === d.id ? { ...prev, ...d } as Match : prev);
         // Only do a full refetch when status changes (match started/ended)
-        if (['live', 'completed', 'completed_provisional', 'finalized', 'scheduled'].includes(d.status)) {
+        if (['live', 'completed', 'scheduled'].includes(d.status)) {
           debouncedFetch();
         }
       })
@@ -90,7 +90,7 @@ export default function ScoreControlPanel() {
     const [liveRes, scheduledRes, completedRes] = await Promise.all([
       supabase.from('matches').select(matchSelect).eq('status', 'live').order('started_at', { ascending: false }),
       supabase.from('matches').select(matchSelect).eq('status', 'scheduled').order('scheduled_at').limit(20),
-      supabase.from('matches').select(matchSelect).in('status', ['completed', 'completed_provisional', 'finalized']).order('completed_at', { ascending: false }).limit(10),
+      supabase.from('matches').select(matchSelect).eq('status', 'completed').order('completed_at', { ascending: false }).limit(10),
     ]);
     if (liveRes.error || scheduledRes.error || completedRes.error) {
       toast.error(
@@ -109,7 +109,7 @@ export default function ScoreControlPanel() {
   // Get sport name from match
   const getSportName = (match: Match) => ((match.event_sport as any)?.sport_category?.name || '');
 
-  // Start match — check sport rules for toss requirement
+  // Start match â€” check sport rules for toss requirement
   const handleStartMatchClick = (match: Match) => {
     if (requiresToss(getSportName(match))) {
       setTossMatch(match);
@@ -144,11 +144,11 @@ export default function ScoreControlPanel() {
     const { error } = await supabase.from('matches').update(updatePayload).eq('id', match.id);
     if (error) { toast.error('Failed to start match'); return; }
 
-    toast.success('Match started — LIVE!');
+    toast.success('Match started â€” LIVE!');
     fetchMatches();
   };
 
-  // Toss confirmed → start cricket match
+  // Toss confirmed â†’ start cricket match
   const handleTossConfirm = async (tossWinnerId: string, tossDecision: 'bat' | 'bowl', battingTeamId: string, bowlingTeamId: string) => {
     if (!tossMatch) return;
     setIsTossModalOpen(false);
@@ -190,9 +190,7 @@ export default function ScoreControlPanel() {
     const round = String(match.round || '').toLowerCase();
     const isKnockout = KNOCKOUT_ROUNDS.has(round);
     const winnerId = scoreA > scoreB ? match.team_a_id : scoreB > scoreA ? match.team_b_id : null;
-    const isDraw = scoreA === scoreB;
-    let resultStatus: string = isDraw ? 'draw' : 'completed';
-    if (isKnockout && winnerId) resultStatus = 'advanced';
+    const resultStatus = 'final';
 
     // For cricket, re-fetch latest scores from DB before ending
     let finalScoreA = scoreA;
@@ -204,9 +202,7 @@ export default function ScoreControlPanel() {
         finalScoreA = freshMatch.runs_a ?? 0;
         finalScoreB = freshMatch.runs_b ?? 0;
         finalWinnerId = finalScoreA > finalScoreB ? match.team_a_id : finalScoreB > finalScoreA ? match.team_b_id : null;
-        if (isKnockout && finalWinnerId) resultStatus = 'advanced';
-        else if (finalScoreA === finalScoreB) resultStatus = 'draw';
-        else resultStatus = 'completed';
+        // Completed matches are now final immediately.
       }
     }
 
@@ -246,10 +242,10 @@ export default function ScoreControlPanel() {
 
     if (isKnockout && finalWinnerId) {
       const nextMatchId = await tryCreateNextRoundMatch(match.id, match.event_sport_id, user?.id || '', match.scheduled_at);
-      toast.success(nextMatchId ? `${resultMsg} — Winner advanced to next round!` : `${resultMsg} — Waiting for other matches.`);
+      toast.success(nextMatchId ? `${resultMsg} â€” Winner advanced to next round!` : `${resultMsg} â€” Waiting for other matches.`);
     } else if (round === 'group_stage' && match.team_a_id && match.team_b_id) {
       await updateStandingsAfterMatch(match.id, match.event_sport_id, match.team_a_id, match.team_b_id, finalScoreA, finalScoreB);
-      toast.success(`${resultMsg} — Standings updated!`);
+      toast.success(`${resultMsg} â€” Standings updated!`);
     } else {
       toast.success(resultMsg);
     }
@@ -302,7 +298,7 @@ export default function ScoreControlPanel() {
         ? (() => {
             const need = target - runsB;
             const ballsLeft = 120 - ballsB;
-            return ballsLeft > 0 ? (need / (ballsLeft / 6)).toFixed(2) : '∞';
+            return ballsLeft > 0 ? (need / (ballsLeft / 6)).toFixed(2) : 'âˆž';
           })()
         : null;
 
@@ -310,7 +306,7 @@ export default function ScoreControlPanel() {
         <div className="mb-4">
           {tossWinnerName && (
             <p className="text-center text-xs text-muted-foreground mb-2">
-              🪙 {tossWinnerName} won toss — <span className="capitalize">{tossDecision}</span> first
+              ðŸª™ {tossWinnerName} won toss â€” <span className="capitalize">{tossDecision}</span> first
             </p>
           )}
           {target && innings === 2 && (
@@ -464,7 +460,7 @@ export default function ScoreControlPanel() {
                       {format(new Date(match.scheduled_at), 'MMM d, yyyy HH:mm')}
                     </p>
                   </div>
-                  {match.venue && <p className="text-sm text-muted-foreground">📍 {(match.venue as any).name}</p>}
+                  {match.venue && <p className="text-sm text-muted-foreground">ðŸ“ {(match.venue as any).name}</p>}
                   <StatusBadge status="scheduled" />
                   {match.team_a_id && match.team_b_id && (
                     <Button onClick={() => handleStartMatchClick(match)}>
@@ -519,8 +515,7 @@ export default function ScoreControlPanel() {
                       </div>
                       <div className="flex items-center gap-2">
                         <StatusBadge status={match.status} />
-                        {winnerName && <span className="text-xs font-semibold text-accent">🏆 {winnerName}</span>}
-                        {match.result_status === 'advanced' && <span className="text-xs text-accent">➡ Advanced</span>}
+                        {winnerName && <span className="text-xs font-semibold text-accent">ðŸ† {winnerName}</span>}
                       </div>
                     </div>
                   </div>
@@ -545,7 +540,7 @@ export default function ScoreControlPanel() {
               .select('status,match_phase,winner_team_id,round,event_sport_id,team_a_id,team_b_id,runs_a,runs_b,score_a,score_b,scheduled_at')
               .eq('id', selectedMatch.id)
               .single();
-            if (freshMatch && (freshMatch.status === 'completed' || freshMatch.status === 'completed_provisional') && freshMatch.match_phase === 'completed' && freshMatch.winner_team_id) {
+            if (freshMatch && freshMatch.status === 'completed' && freshMatch.match_phase === 'completed' && freshMatch.winner_team_id) {
               // Trigger bracket progression
               if (KNOCKOUT_ROUNDS.has(String(freshMatch.round || '').toLowerCase())) {
                 await tryCreateNextRoundMatch(selectedMatch.id, freshMatch.event_sport_id, user?.id || '', freshMatch.scheduled_at);

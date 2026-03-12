@@ -42,7 +42,7 @@ interface EventTeamTotal {
 
 export default function AdminReports() {
   const [loading, setLoading] = useState(true);
-  const [finalizedMatches, setFinalizedMatches] = useState<Match[]>([]);
+  const [completedMatches, setCompletedMatches] = useState<Match[]>([]);
   const [groupStandings, setGroupStandings] = useState<GroupStandingRow[]>([]);
   const [champions, setChampions] = useState<ChampionRow[]>([]);
   const [selectedEventSportId, setSelectedEventSportId] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export default function AdminReports() {
           ),
           scores(*)
         `)
-        .eq('status', 'finalized'),
+        .eq('status', 'completed'),
       supabase
         .from('group_standings' as any)
         .select(`
@@ -93,7 +93,7 @@ export default function AdminReports() {
           ),
           winner:teams!matches_winner_id_fkey(name)
         `)
-        .eq('status', 'finalized')
+        .eq('status', 'completed')
         .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final'])
         .eq('round', 'final')
         .not('winner_id', 'is', null),
@@ -110,7 +110,7 @@ export default function AdminReports() {
         `),
     ]);
 
-    setFinalizedMatches((matchesRes.data as unknown as Match[]) || []);
+    setCompletedMatches((matchesRes.data as unknown as Match[]) || []);
     setGroupStandings((standingsRes.data as GroupStandingRow[]) || []);
     setTotalParticipants(participantsRes.count || 0);
 
@@ -145,10 +145,10 @@ export default function AdminReports() {
     return {
       totalTeams: eventTeamTotals.reduce((sum, item) => sum + item.teamCount, 0),
       totalParticipants,
-      totalMatches: finalizedMatches.length,
-      completedMatches: finalizedMatches.length,
+      totalMatches: completedMatches.length,
+      completedMatches: completedMatches.length,
     };
-  }, [eventTeamTotals, finalizedMatches, totalParticipants]);
+  }, [eventTeamTotals, completedMatches, totalParticipants]);
 
   const standingsByGroup = useMemo(() => {
     const map = new Map<string, GroupStandingRow[]>();
@@ -178,7 +178,7 @@ export default function AdminReports() {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl lg:text-3xl font-display font-bold">Reports</h1>
-          <p className="text-muted-foreground">Finalized match outcomes, standings, brackets, and champions.</p>
+          <p className="text-muted-foreground">Completed match outcomes, standings, brackets, and champions.</p>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -231,13 +231,13 @@ export default function AdminReports() {
                   <div className="flex items-center gap-2">
                     <Trophy className="h-4 w-4 text-accent" />
                     <span className="font-semibold">{champion.winner?.name || 'TBD'}</span>
-                    <StatusBadge status="finalized" />
+                    <StatusBadge status="completed" />
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground">No finalized finals yet.</p>
+            <p className="text-muted-foreground">No completed finals yet.</p>
           )}
         </div>
 

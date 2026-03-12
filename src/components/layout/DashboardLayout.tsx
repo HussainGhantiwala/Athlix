@@ -71,7 +71,6 @@ const getNavItemsForRole = (role: AppRole | null): NavItem[] => {
         { label: 'Rule Book', href: '/faculty/rule-book', icon: <BookOpen className="h-5 w-5" /> },
         { label: 'Teams', href: '/faculty/teams', icon: <Users className="h-5 w-5" /> },
         { label: 'Matches', href: '/faculty/matches', icon: <Target className="h-5 w-5" /> },
-        { label: 'Finalize Scores', href: '/faculty/score-finalization', icon: <Target className="h-5 w-5" /> },
         { label: 'Registrations', href: '/faculty/registrations', icon: <ClipboardList className="h-5 w-5" /> },
         { label: 'Budgets', href: '/faculty/budgets', icon: <DollarSign className="h-5 w-5" /> },
       ];

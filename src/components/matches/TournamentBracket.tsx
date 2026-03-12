@@ -135,7 +135,7 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
                       <span>{teamBScore}</span>
                     </div>
 
-                    {match.status === MatchStatusEnum.Finalized && (
+                    {match.status === MatchStatusEnum.Completed && (
                       <div className="text-xs text-muted-foreground pt-1 border-t border-border">
                         Winner: {winnerA ? match.team_a?.name : winnerB ? match.team_b?.name : 'Draw'}
                       </div>

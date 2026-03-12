@@ -156,12 +156,12 @@ export async function generateKnockoutMatches(
       if (hasBye) {
         const winnerId = m.team_a_id || m.team_b_id;
         await supabase.from('matches').update({
-          status: 'finalized',
-          result_status: 'advanced',
+          status: 'completed',
+          result_status: 'final',
           winner_team_id: winnerId,
           phase: MATCH_PHASE_FINISHED,
           match_phase: 'completed',
-          finalized_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
         }).eq('id', m.id);
 
         // Try to create next round match if pair is also done

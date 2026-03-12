@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -86,7 +86,7 @@ export default function FacultyDashboard() {
       supabase.from('budgets').select('id', { count: 'exact' }).eq('submitted_by', user?.id || ''),
     ]);
 
-    const provisionalCount = matchesRes.data?.filter(m => m.status === 'completed_provisional').length || 0;
+    const provisionalCount = matchesRes.data?.filter(m => m.status === 'completed').length || 0;
     const liveCount = matchesRes.data?.filter(m => m.status === 'live').length || 0;
 
     setStats({
@@ -128,7 +128,7 @@ export default function FacultyDashboard() {
         event_sport:event_sports(sport_category:sports_categories(name, icon)),
         scores(*)
       `)
-      .eq('status', 'completed_provisional')
+      .eq('status', 'completed')
       .order('completed_at', { ascending: false })
       .limit(5);
 
@@ -186,10 +186,10 @@ export default function FacultyDashboard() {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-2xl lg:text-3xl font-display font-bold">
-              {getGreeting()}, {profile?.full_name?.split(' ')[0] || 'Faculty'}! 👋
+              {getGreeting()}, {profile?.full_name?.split(' ')[0] || 'Faculty'}! ðŸ‘‹
             </h1>
             <p className="text-muted-foreground">
-              Faculty Coordinator Dashboard — Manage events, teams, and finalize scores
+              Faculty Coordinator Dashboard â€” Manage events, teams, and completed matches
             </p>
           </div>
           <div className="flex gap-2">
@@ -223,10 +223,10 @@ export default function FacultyDashboard() {
                 description="Happening now"
               />
               <StatsCard
-                title="Pending Finalization"
+                title="Finished Matches"
                 value={stats.provisionalMatches}
                 icon={Clock}
-                description="Awaiting your review"
+                description="Completed automatically"
               />
               <StatsCard
                 title="Pending Teams"
@@ -259,15 +259,15 @@ export default function FacultyDashboard() {
         )}
 
         <div className="grid lg:grid-cols-2 gap-6">
-          {/* Matches Pending Finalization */}
+          {/* Recent Finished Matches */}
           <div className="dashboard-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-display font-bold flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-status-provisional" />
-                Pending Finalization
+                Recent Finished Matches
               </h2>
-              <Link to="/faculty/matches?status=completed_provisional" className="text-sm text-accent hover:underline">
-                View all →
+              <Link to="/faculty/matches?status=completed" className="text-sm text-accent hover:underline">
+                View all â†’
               </Link>
             </div>
 
@@ -299,11 +299,7 @@ export default function FacultyDashboard() {
                           </p>
                         </div>
                       </div>
-                      <Button size="sm" asChild>
-                        <Link to={`/faculty/matches/${match.id}/finalize`}>
-                          Finalize
-                        </Link>
-                      </Button>
+                      <StatusBadge status={match.status} />
                     </div>
                   );
                 })}
@@ -311,7 +307,7 @@ export default function FacultyDashboard() {
             ) : (
               <div className="text-center py-8">
                 <CheckCircle className="h-12 w-12 text-status-finalized mx-auto mb-3" />
-                <p className="text-muted-foreground">No matches pending finalization</p>
+                <p className="text-muted-foreground">No completed matches yet</p>
               </div>
             )}
           </div>
@@ -324,7 +320,7 @@ export default function FacultyDashboard() {
                 Team Approvals
               </h2>
               <Link to="/faculty/teams" className="text-sm text-accent hover:underline">
-                View all →
+                View all â†’
               </Link>
             </div>
 
@@ -430,7 +426,7 @@ export default function FacultyDashboard() {
               </div>
               <div>
                 <p className="font-medium text-sm">Matches</p>
-                <p className="text-xs text-muted-foreground">Finalize scores</p>
+                <p className="text-xs text-muted-foreground">Finished and live scores</p>
               </div>
             </Link>
           </div>
@@ -439,3 +435,4 @@ export default function FacultyDashboard() {
     </DashboardLayout>
   );
 }
+

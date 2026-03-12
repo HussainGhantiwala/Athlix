@@ -12,8 +12,8 @@ const statusConfig: Record<StatusType, { label: string; className: string }> = {
   // Match statuses
   scheduled: { label: 'Scheduled', className: 'bg-muted text-muted-foreground' },
   live: { label: 'LIVE', className: 'bg-status-live text-white animate-pulse-slow' },
-  completed_provisional: { label: 'Provisional', className: 'bg-status-provisional text-white' },
-  finalized: { label: 'Finalized', className: 'bg-status-finalized text-white' },
+  completed_provisional: { label: 'Finished', className: 'bg-primary text-primary-foreground' },
+  finalized: { label: 'Finished', className: 'bg-primary text-primary-foreground' },
   cancelled: { label: 'Cancelled', className: 'bg-status-cancelled text-white' },
   
   // Event statuses
@@ -21,7 +21,7 @@ const statusConfig: Record<StatusType, { label: string; className: string }> = {
   pending_approval: { label: 'Pending', className: 'bg-status-provisional text-white' },
   approved: { label: 'Approved', className: 'bg-status-finalized text-white' },
   active: { label: 'Active', className: 'bg-status-live text-white' },
-  completed: { label: 'Completed', className: 'bg-primary text-primary-foreground' },
+  completed: { label: 'Finished', className: 'bg-primary text-primary-foreground' },
   
   // Team statuses
   forming: { label: 'Forming', className: 'bg-muted text-muted-foreground' },

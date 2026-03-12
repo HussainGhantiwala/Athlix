@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
+﻿import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Match } from '@/types/database';
 import { cn } from '@/lib/utils';
@@ -206,8 +206,8 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
     const finalMatch = finalSlots?.[0]?.match;
     const winnerId = (finalMatch as any)?.winner_id || finalMatch?.winner_team_id;
     if (!winnerId) return null;
-    const isFinalized = finalMatch.status === 'finalized' || finalMatch.status === 'completed_provisional';
-    if (!isFinalized) return null;
+    const isFinished = finalMatch.status === 'completed';
+    if (!isFinished) return null;
     return winnerId === finalMatch.team_a_id
       ? finalMatch.team_a?.name
       : finalMatch.team_b?.name;
@@ -250,7 +250,7 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
                 transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
                 className="text-3xl mb-1"
               >
-                🏆
+                ðŸ†
               </motion.div>
               <p className="text-xs font-semibold text-accent uppercase tracking-wider">Tournament Champion</p>
               <p className="text-xl font-display font-bold text-accent">{champion}</p>
@@ -272,7 +272,7 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
               <Maximize2 className="h-4 w-4" />
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">Scroll to zoom · Drag to pan</p>
+          <p className="text-xs text-muted-foreground">Scroll to zoom Â· Drag to pan</p>
         </div>
 
         {/* Bracket Container with Zoom/Pan */}
@@ -365,7 +365,7 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
   );
 }
 
-/* ────────────────── Bracket Match Card with Tooltip ────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Bracket Match Card with Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyAdvanced, onClick }: {
   match: BracketMatch;
@@ -374,7 +374,7 @@ const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyA
   onClick: () => void;
 }) {
   const isLive = match.status === 'live';
-  const isFinalized = match.status === 'finalized' || match.status === 'completed_provisional';
+  const isFinalized = match.status === 'completed';
   const winnerId = (match as any).winner_id || match.winner_team_id;
   const winnerA = winnerId === match.team_a_id;
   const winnerB = winnerId === match.team_b_id;
@@ -409,8 +409,8 @@ const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyA
       {match.match_phase && match.match_phase !== 'not_started' && (
         <p className="text-muted-foreground capitalize">{match.match_phase.replace(/_/g, ' ')}</p>
       )}
-      {winnerName && <p className="text-accent font-semibold">🏆 {winnerName}</p>}
-      {isLive && <p className="text-status-live font-semibold">🔴 LIVE</p>}
+      {winnerName && <p className="text-accent font-semibold">ðŸ† {winnerName}</p>}
+      {isLive && <p className="text-status-live font-semibold">ðŸ”´ LIVE</p>}
       <p className="text-muted-foreground">{format(new Date(match.scheduled_at), 'MMM d, yyyy h:mm a')}</p>
     </div>
   );
@@ -471,7 +471,7 @@ const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyA
               transition={{ repeat: Infinity, duration: 1.5 }}
               className="bg-status-live/10 text-status-live text-xs text-center py-1 font-semibold"
             >
-              🔴 LIVE
+              ðŸ”´ LIVE
             </motion.div>
           )}
         </motion.div>
@@ -483,7 +483,7 @@ const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyA
   );
 });
 
-/* ────────────────── Team Row ────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Team Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function TeamRow({ name, score, scoreDetail, isWinner, isLoser, isNewWinner, hasBorder }: {
   name: string;
@@ -539,7 +539,7 @@ function TeamRow({ name, score, scoreDetail, isWinner, isLoser, isNewWinner, has
   );
 }
 
-/* ────────────────── Match Detail Modal ────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Match Detail Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onClose: () => void }) {
   if (!match) return null;
@@ -576,7 +576,7 @@ function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onCl
               <div className="space-y-3">
                 <div className={cn('flex justify-between items-center', winnerA && 'text-accent font-bold')}>
                   <div>
-                    <p className="font-semibold">{winnerA && '🏆 '}{match.team_a?.name || 'TBD'}</p>
+                    <p className="font-semibold">{winnerA && 'ðŸ† '}{match.team_a?.name || 'TBD'}</p>
                     <p className="text-xs text-muted-foreground">{match.team_a?.university?.short_name}</p>
                   </div>
                   <div className="text-right">
@@ -587,7 +587,7 @@ function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onCl
                 <div className="border-t border-border" />
                 <div className={cn('flex justify-between items-center', winnerB && 'text-accent font-bold')}>
                   <div>
-                    <p className="font-semibold">{winnerB && '🏆 '}{match.team_b?.name || 'TBD'}</p>
+                    <p className="font-semibold">{winnerB && 'ðŸ† '}{match.team_b?.name || 'TBD'}</p>
                     <p className="text-xs text-muted-foreground">{match.team_b?.university?.short_name}</p>
                   </div>
                   <div className="text-right">
@@ -604,7 +604,7 @@ function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onCl
             ) : (
               <div className="flex items-center justify-between">
                 <div className={cn('text-center flex-1', winnerA && 'text-accent')}>
-                  <p className={cn('font-semibold', winnerA && 'font-bold')}>{winnerA && '🏆 '}{match.team_a?.name || 'TBD'}</p>
+                  <p className={cn('font-semibold', winnerA && 'font-bold')}>{winnerA && 'ðŸ† '}{match.team_a?.name || 'TBD'}</p>
                   <p className="text-xs text-muted-foreground">{match.team_a?.university?.short_name}</p>
                 </div>
                 <div className="px-4 flex items-center gap-3">
@@ -613,7 +613,7 @@ function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onCl
                   <span className={cn('text-3xl font-display font-bold', winnerB && 'text-accent')}>{scoreB}</span>
                 </div>
                 <div className={cn('text-center flex-1', winnerB && 'text-accent')}>
-                  <p className={cn('font-semibold', winnerB && 'font-bold')}>{winnerB && '🏆 '}{match.team_b?.name || 'TBD'}</p>
+                  <p className={cn('font-semibold', winnerB && 'font-bold')}>{winnerB && 'ðŸ† '}{match.team_b?.name || 'TBD'}</p>
                   <p className="text-xs text-muted-foreground">{match.team_b?.university?.short_name}</p>
                 </div>
               </div>
@@ -626,7 +626,6 @@ function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onCl
               <div className="flex items-center gap-2 text-accent font-semibold">
                 <Trophy className="h-4 w-4" />
                 Winner: {winnerName}
-                {match.result_status === 'advanced' && <span className="text-xs bg-accent/10 px-2 py-0.5 rounded">Advanced ➡</span>}
               </div>
             )}
 

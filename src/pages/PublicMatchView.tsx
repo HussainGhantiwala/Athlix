@@ -87,7 +87,7 @@ export default function PublicMatchView() {
   const { teamAScore, teamBScore } = getTeamScores(match);
   const winnerId = match.winner_id || match.winner_team_id;
   const winnerName =
-    match.status === MatchStatusEnum.Finalized
+    match.status === MatchStatusEnum.Completed
       ? winnerId === match.team_a_id
         ? match.team_a?.name
         : winnerId === match.team_b_id

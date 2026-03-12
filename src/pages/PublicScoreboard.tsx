@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Match, Event } from '@/types/database';
@@ -54,7 +54,7 @@ export default function PublicScoreboard() {
 
     const [{ data: live }, { data: recent }] = await Promise.all([
       supabase.from('matches').select(matchSelect).eq('status', 'live').order('started_at', { ascending: false }),
-      supabase.from('matches').select(matchSelect).eq('status', 'finalized').order('finalized_at', { ascending: false }).limit(10),
+      supabase.from('matches').select(matchSelect).eq('status', 'completed').order('completed_at', { ascending: false }).limit(10),
     ]);
 
     setLiveMatches((live as unknown as Match[]) || []);
@@ -147,13 +147,13 @@ export default function PublicScoreboard() {
         </div>
 
         {match.round && (
-          <p className="text-xs text-muted-foreground mb-2">{match.round}{match.group_name ? ` — Group ${match.group_name}` : ''}</p>
+          <p className="text-xs text-muted-foreground mb-2">{match.round}{match.group_name ? ` â€” Group ${match.group_name}` : ''}</p>
         )}
 
         {/* Toss info */}
         {tossWinnerName && isCricket && (
           <p className="text-center text-xs text-muted-foreground mb-2">
-            🪙 {tossWinnerName} won toss — <span className="capitalize">{tossDecision}</span> first
+            ðŸª™ {tossWinnerName} won toss â€” <span className="capitalize">{tossDecision}</span> first
           </p>
         )}
 
@@ -209,7 +209,7 @@ export default function PublicScoreboard() {
           const activeBalls = innings === 2 ? ballsB : ballsA;
           const rr = activeBalls > 0 ? (activeRuns / (activeBalls / 6)).toFixed(2) : '0.00';
           const rrr = innings === 2 && target
-            ? (() => { const need = target - scoreB; const bl = 120 - ballsB; return bl > 0 ? (need / (bl / 6)).toFixed(2) : '∞'; })()
+            ? (() => { const need = target - scoreB; const bl = 120 - ballsB; return bl > 0 ? (need / (bl / 6)).toFixed(2) : 'âˆž'; })()
             : null;
           return (
             <div className="flex justify-center gap-4 mt-2 text-xs text-muted-foreground">
@@ -219,26 +219,25 @@ export default function PublicScoreboard() {
           );
         })()}
 
-        {winnerId && (match.status === 'finalized' || match.status === 'completed_provisional') && (() => {
+        {winnerId && match.status === 'completed' && (() => {
           const winnerName = winnerId === match.team_a_id ? teamAName : teamBName;
-          let resultText = `🏆 Winner: ${winnerName}`;
+          let resultText = `ðŸ† Winner: ${winnerName}`;
           if (isCricket) {
             if (winnerId === match.team_a_id) {
-              resultText = `🏆 ${teamAName} won by ${scoreA - scoreB} runs`;
+              resultText = `ðŸ† ${teamAName} won by ${scoreA - scoreB} runs`;
             } else {
-              resultText = `🏆 ${teamBName} won by ${10 - wicketsB} wickets`;
+              resultText = `ðŸ† ${teamBName} won by ${10 - wicketsB} wickets`;
             }
           }
           return (
             <p className="text-xs font-semibold text-accent text-center mt-3 pt-3 border-t border-border">
               {resultText}
-              {match.result_status === 'advanced' && ' — ➡ Advanced'}
             </p>
           );
         })()}
 
         {match.venue && !match.winner_team_id && (
-          <p className="text-xs text-muted-foreground text-center mt-3 pt-3 border-t border-border">📍 {match.venue.name}</p>
+          <p className="text-xs text-muted-foreground text-center mt-3 pt-3 border-t border-border">ðŸ“ {match.venue.name}</p>
         )}
       </div>
     );
@@ -317,7 +316,7 @@ export default function PublicScoreboard() {
           <TabsContent value="results" className="space-y-6">
             <div className="text-center">
               <h2 className="text-2xl font-display font-bold">Recent Results</h2>
-              <p className="text-muted-foreground">Latest finalized matches</p>
+              <p className="text-muted-foreground">Latest finished matches</p>
             </div>
             {recentMatches.length > 0 ? (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -335,7 +334,7 @@ export default function PublicScoreboard() {
           {hasBracket && (
             <TabsContent value="bracket" className="space-y-6">
               <div className="text-center">
-                <h2 className="text-2xl font-display font-bold">🏆 Knockout Bracket</h2>
+                <h2 className="text-2xl font-display font-bold">ðŸ† Knockout Bracket</h2>
                 <p className="text-muted-foreground">Tournament bracket view</p>
               </div>
               {bracketEvents.length > 1 && (
@@ -346,7 +345,7 @@ export default function PublicScoreboard() {
                   <SelectContent>
                     {bracketEvents.map(s => (
                       <SelectItem key={s.id} value={s.id}>
-                        {s.sport_category?.icon} {s.sport_category?.name} — {s.event?.name}
+                        {s.sport_category?.icon} {s.sport_category?.name} â€” {s.event?.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -359,7 +358,7 @@ export default function PublicScoreboard() {
           {hasStandings && (
             <TabsContent value="standings" className="space-y-6">
               <div className="text-center">
-                <h2 className="text-2xl font-display font-bold">📊 Standings</h2>
+                <h2 className="text-2xl font-display font-bold">ðŸ“Š Standings</h2>
                 <p className="text-muted-foreground">Group & league standings</p>
               </div>
               {standingsEvents.length > 1 && (
@@ -370,7 +369,7 @@ export default function PublicScoreboard() {
                   <SelectContent>
                     {standingsEvents.map(s => (
                       <SelectItem key={s.id} value={s.id}>
-                        {s.sport_category?.icon} {s.sport_category?.name} — {s.event?.name}
+                        {s.sport_category?.icon} {s.sport_category?.name} â€” {s.event?.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -433,9 +432,10 @@ export default function PublicScoreboard() {
 
       <footer className="border-t border-border py-8 mt-12">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>© 2026 Athletix. University Sports Management System.</p>
+          <p>Â© 2026 Athletix. University Sports Management System.</p>
         </div>
       </footer>
     </div>
   );
 }
+

@@ -1,11 +1,11 @@
 export type AppRole = 'admin' | 'faculty' | 'student_coordinator' | 'student';
 export type EventStatus = 'draft' | 'pending_approval' | 'approved' | 'active' | 'completed' | 'cancelled';
-export type MatchStatus = 'scheduled' | 'live' | 'completed_provisional' | 'finalized' | 'cancelled';
+export type MatchStatus = 'scheduled' | 'live' | 'completed' | 'cancelled' | 'completed_provisional' | 'finalized';
 export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
 export type TeamStatus = 'forming' | 'pending_approval' | 'approved' | 'locked';
 export type BudgetStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
 export type TournamentType = 'knockout' | 'group' | 'league';
-export type ResultStatus = 'pending' | 'completed' | 'advanced' | 'eliminated' | 'draw';
+export type ResultStatus = 'pending' | 'completed' | 'advanced' | 'eliminated' | 'draw' | 'final';
 
 export interface Profile {
   id: string;

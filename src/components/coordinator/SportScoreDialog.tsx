@@ -79,7 +79,7 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
   const completionNotifiedRef = useRef(false);
 
   const isCompletedMatch = useCallback((status?: string | null, phase?: string | null) => {
-    return status === 'completed' || status === 'completed_provisional' || status === 'finalized' || phase === 'completed';
+    return status === 'completed' || phase === 'completed';
   }, []);
 
   const sportName = (match?.event_sport as any)?.sport_category?.name;
@@ -177,7 +177,7 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
                     completed_at: new Date().toISOString(),
                     winner_id: winnerTeamId,
                     winner_team_id: winnerTeamId,
-                    result_status: isKnockout ? 'advanced' : 'completed',
+                    result_status: 'final',
                     score_a: d.runs_a ?? 0,
                     score_b: d.runs_b ?? 0,
                     current_editor_id: null,
@@ -245,7 +245,7 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
           completed_at: new Date().toISOString(),
           winner_id: winnerTeamId,
           winner_team_id: winnerTeamId,
-          result_status: isKnockout ? 'advanced' : 'completed',
+          result_status: 'final',
           current_editor_id: null,
           editor_locked_at: null,
         } as any).eq('id', match.id).neq('status', 'completed');
@@ -415,7 +415,7 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
       score_b: scoreB,
       winner_id: winnerId,
       winner_team_id: winnerId,
-      result_status: winnerId ? (isKnockout ? 'advanced' : 'completed') : 'draw',
+      result_status: 'final',
       phase: 'finished',
       match_phase: 'completed',
     } as any).eq('id', match.id);

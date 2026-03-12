@@ -64,7 +64,7 @@ export default function Analytics() {
         .select('event_sport:event_sports(sport_category:sports_categories(name))')
     ]);
 
-    const completedMatches = matchesRes.data?.filter(m => m.status === 'finalized').length || 0;
+    const completedMatches = matchesRes.data?.filter(m => m.status === 'completed').length || 0;
     const totalBudget = budgetsRes.data?.reduce((sum, b) => sum + (b.estimated_amount || 0), 0) || 0;
     const approvedBudget = budgetsRes.data
       ?.filter(b => b.status === 'approved')

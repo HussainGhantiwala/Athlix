@@ -505,8 +505,8 @@ export default function CoordinatorDashboard() {
             <div>
               <p className="font-medium text-sm">Important Reminder</p>
               <p className="text-sm text-muted-foreground">
-                You can update live scores and mark matches as completed (provisional), but only Faculty
-                Coordinators can finalize match results. Make sure to complete matches promptly after they end.
+                You can update live scores and complete matches directly. Completed matches are finalized
+                automatically with final score, winner, and finished status.
               </p>
             </div>
           </div>

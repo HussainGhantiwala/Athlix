@@ -315,7 +315,7 @@ export class TournamentService {
       .eq('event_id', eventId)
       .eq('round', 'group_stage')
       .not('group_name', 'is', null)
-      .in('status', ['completed', 'finalized']);
+      .eq('status', 'completed');
     if (error) throw error;
 
     const standings = new Map<string, StandingAccumulator>();
@@ -393,7 +393,7 @@ export class TournamentService {
       .eq('event_id', eventId)
       .eq('round', 'group_stage')
       .is('group_name', null)
-      .in('status', ['completed', 'finalized']);
+      .eq('status', 'completed');
     if (error) throw error;
 
     const points = new Map<string, StandingAccumulator & { teamId: string | null }>();
