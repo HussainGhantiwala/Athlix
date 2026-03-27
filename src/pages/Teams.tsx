@@ -5,7 +5,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Team, TeamMember } from '@/types/database';
+import { Team, TeamMember, TeamPlayer } from '@/types/database';
 import {
   Dialog,
   DialogContent,
@@ -36,6 +36,7 @@ export default function Teams() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamPlayers, setTeamPlayers] = useState<TeamPlayer[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
   useEffect(() => {
@@ -73,17 +74,33 @@ export default function Teams() {
 
   const fetchTeamMembers = async (teamId: string) => {
     setLoadingMembers(true);
-    const { data, error } = await supabase
-      .from('team_members')
-      .select(`
-        *,
-        profile:profiles(full_name, email, avatar_url)
-      `)
-      .eq('team_id', teamId)
-      .order('is_captain', { ascending: false });
+    const [membersResult, playersResult] = await Promise.all([
+      supabase
+        .from('team_members')
+        .select(`
+          *,
+          profile:profiles(full_name, email, avatar_url)
+        `)
+        .eq('team_id', teamId)
+        .order('is_captain', { ascending: false }),
+      supabase
+        .from('team_players')
+        .select('*')
+        .eq('team_id', teamId)
+        .order('jersey_number', { ascending: true })
+        .order('name', { ascending: true }),
+    ]);
 
-    if (!error) {
-      setTeamMembers((data as unknown as TeamMember[]) || []);
+    if (!membersResult.error) {
+      setTeamMembers((membersResult.data as unknown as TeamMember[]) || []);
+    } else {
+      setTeamMembers([]);
+    }
+
+    if (!playersResult.error) {
+      setTeamPlayers((playersResult.data as TeamPlayer[]) || []);
+    } else {
+      setTeamPlayers([]);
     }
 
     setLoadingMembers(false);
@@ -92,6 +109,8 @@ export default function Teams() {
   const handleViewTeam = async (team: Team) => {
     setSelectedTeam(team);
     setIsDetailOpen(true);
+    setTeamMembers([]);
+    setTeamPlayers([]);
     await fetchTeamMembers(team.id);
   };
 
@@ -308,7 +327,7 @@ export default function Teams() {
                   <Skeleton key={i} className="h-14 rounded-lg" />
                 ))}
               </div>
-            ) : teamMembers.length > 0 ? (
+            ) : teamMembers.length > 0 || teamPlayers.length > 0 ? (
               <div className="space-y-3">
                 {teamMembers.map((member) => (
                   <div key={member.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
@@ -330,6 +349,27 @@ export default function Teams() {
                       <p className="text-sm text-muted-foreground">
                         {member.position || 'Player'}
                         {member.jersey_number && ` - #${member.jersey_number}`}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {teamPlayers.map((player) => (
+                  <div key={player.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback>
+                        {player.name.charAt(0) || 'P'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <p className="font-medium flex items-center gap-2">
+                        {player.name}
+                        <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                          Dummy
+                        </span>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Test Player
+                        {player.jersey_number && ` - #${player.jersey_number}`}
                       </p>
                     </div>
                   </div>

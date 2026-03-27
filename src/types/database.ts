@@ -83,6 +83,18 @@ export interface EventSport {
   event?: Event;
 }
 
+export interface TeamPlayer {
+  id: string;
+  event_id: string;
+  event_sport_id: string;
+  team_id: string;
+  name: string;
+  jersey_number?: number;
+  is_dummy: boolean;
+  created_by?: string;
+  created_at: string;
+}
+
 export interface CoordinatorAssignment {
   id: string;
   event_id: string;
@@ -112,6 +124,8 @@ export interface Registration {
 export interface Team {
   id: string;
   event_sport_id: string;
+  event_id?: string;
+  sport_id?: string;
   name: string;
   university_id?: string;
   captain_id?: string;
@@ -123,6 +137,7 @@ export interface Team {
   updated_at: string;
   university?: University;
   members?: TeamMember[];
+  players?: TeamPlayer[];
 }
 
 export interface TeamMember {

@@ -18,6 +18,9 @@ export interface EventSportConfig {
   sport_category: {
     name: string;
     icon: string | null;
+    is_team_sport?: boolean | null;
+    min_team_size?: number | null;
+    max_team_size?: number | null;
   } | null;
 }
 
@@ -81,7 +84,7 @@ export async function getEventSportsFromApprovedForms(eventId: string): Promise<
 
   const { data: eventSportsData, error: eventSportsError } = await supabase
     .from('event_sports')
-    .select('id, event_id, sport_category_id, sport_category:sports_categories(name, icon)')
+    .select('id, event_id, sport_category_id, sport_category:sports_categories(name, icon, is_team_sport, min_team_size, max_team_size)')
     .eq('event_id', eventId)
     .in('sport_category_id', sportIds)
     .order('created_at', { ascending: true });

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Event, University } from '@/types/database';
 import MatchGenerator from '@/components/tournament/MatchGenerator';
 import DemoTeamGenerator from '@/components/tournament/DemoTeamGenerator';
+import GenerateTeamsButton from '@/components/tournament/GenerateTeamsButton';
 import TournamentReset from '@/components/tournament/TournamentReset';
 import {
   Dialog,
@@ -389,6 +390,7 @@ export default function Events() {
                     {isAdmin && (event.status === 'approved' || event.status === 'active') && (
                       <>
                         <DemoTeamGenerator event={event} onGenerated={fetchEvents} />
+                        <GenerateTeamsButton event={event} onGenerated={fetchEvents} />
                         <MatchGenerator event={event} onGenerated={fetchEvents} />
                         <TournamentReset event={event} onReset={fetchEvents} />
                       </>

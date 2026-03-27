@@ -917,6 +917,64 @@ export type Database = {
           },
         ]
       }
+      team_players: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          event_id: string
+          event_sport_id: string
+          id: string
+          is_dummy: boolean
+          jersey_number: number | null
+          name: string
+          team_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          event_id: string
+          event_sport_id: string
+          id?: string
+          is_dummy?: boolean
+          jersey_number?: number | null
+          name: string
+          team_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          event_id?: string
+          event_sport_id?: string
+          id?: string
+          is_dummy?: boolean
+          jersey_number?: number | null
+          name?: string
+          team_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_players_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_players_event_sport_id_fkey"
+            columns: ["event_sport_id"]
+            isOneToOne: false
+            referencedRelation: "event_sports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_players_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_standings: {
         Row: {
           created_at: string
@@ -997,9 +1055,11 @@ export type Database = {
           captain_id: string | null
           created_at: string
           created_by: string | null
+          event_id: string | null
           event_sport_id: string
           id: string
           name: string
+          sport_id: string | null
           status: Database["public"]["Enums"]["team_status"]
           university_id: string | null
           updated_at: string
@@ -1010,9 +1070,11 @@ export type Database = {
           captain_id?: string | null
           created_at?: string
           created_by?: string | null
+          event_id?: string | null
           event_sport_id: string
           id?: string
           name: string
+          sport_id?: string | null
           status?: Database["public"]["Enums"]["team_status"]
           university_id?: string | null
           updated_at?: string
@@ -1023,19 +1085,35 @@ export type Database = {
           captain_id?: string | null
           created_at?: string
           created_by?: string | null
+          event_id?: string | null
           event_sport_id?: string
           id?: string
           name?: string
+          sport_id?: string | null
           status?: Database["public"]["Enums"]["team_status"]
           university_id?: string | null
           updated_at?: string
         }
         Relationships: [
           {
+            foreignKeyName: "teams_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "teams_event_sport_id_fkey"
             columns: ["event_sport_id"]
             isOneToOne: false
             referencedRelation: "event_sports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "teams_sport_id_fkey"
+            columns: ["sport_id"]
+            isOneToOne: false
+            referencedRelation: "sports_categories"
             referencedColumns: ["id"]
           },
           {
@@ -1172,6 +1250,17 @@ export type Database = {
           out_wickets_a: number
           out_wickets_b: number
         }[]
+      }
+      generate_test_teams_for_event: {
+        Args: {
+          _created_by?: string
+          _event_id: string
+          _event_sport_id: string
+          _max_teams?: number
+          _replace_existing?: boolean
+          _team_size?: number
+        }
+        Returns: Json
       }
       get_user_role: {
         Args: { _user_id: string }
