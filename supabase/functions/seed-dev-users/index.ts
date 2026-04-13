@@ -6,6 +6,7 @@ const corsHeaders = {
 };
 
 const DEV_USERS = [
+  { email: "superadmin@athletix.dev", password: "SuperAdmin@123", fullName: "Super Admin", role: "super_admin" },
   { email: "admin@athletix.dev", password: "Admin@123", fullName: "Admin User", role: "admin" },
   { email: "faculty@athletix.dev", password: "Faculty@123", fullName: "Faculty Coordinator", role: "faculty" },
   { email: "coordinator@athletix.dev", password: "Coordinator@123", fullName: "Student Coordinator", role: "student_coordinator" },
@@ -25,6 +26,33 @@ Deno.serve(async (req) => {
     );
 
     const results: { email: string; status: string }[] = [];
+    const demoDomain = "athletix.dev";
+
+    const { data: existingUniversity } = await supabaseAdmin
+      .from("universities")
+      .select("id")
+      .eq("domain", demoDomain)
+      .maybeSingle();
+
+    let universityId = existingUniversity?.id;
+
+    if (!universityId) {
+      const { data: createdUniversity, error: universityError } = await supabaseAdmin
+        .from("universities")
+        .insert({
+          name: "Athlitix Demo University",
+          short_name: "ATH",
+          domain: demoDomain,
+        })
+        .select("id")
+        .single();
+
+      if (universityError) {
+        throw universityError;
+      }
+
+      universityId = createdUniversity.id;
+    }
 
     for (const user of DEV_USERS) {
       // Check if user already exists by listing users
@@ -59,22 +87,20 @@ Deno.serve(async (req) => {
         id: userId,
         email: user.email,
         full_name: user.fullName,
+        university_id: user.role === "super_admin" ? null : universityId,
       }, { onConflict: "id" });
 
-      // Ensure role exists
-      const { data: existingRole } = await supabaseAdmin
+      await supabaseAdmin
         .from("user_roles")
-        .select("id")
+        .delete()
         .eq("user_id", userId)
-        .eq("role", user.role)
-        .maybeSingle();
+        .neq("role", "super_admin");
 
-      if (!existingRole) {
-        await supabaseAdmin.from("user_roles").insert({
-          user_id: userId,
-          role: user.role,
-        });
-      }
+      await supabaseAdmin.from("user_roles").upsert({
+        user_id: userId,
+        role: user.role,
+        university_id: user.role === "super_admin" ? null : universityId,
+      });
     }
 
     return new Response(JSON.stringify({ success: true, results }), {

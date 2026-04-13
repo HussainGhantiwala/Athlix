@@ -22,6 +22,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { getTenantScope } from '@/lib/tenant-scope';
 
 interface FacultyStats {
   assignedEvents: number;
@@ -33,7 +34,7 @@ interface FacultyStats {
 }
 
 export default function FacultyDashboard() {
-  const { profile, user } = useAuth();
+  const { profile, user, universityId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<FacultyStats>({
     assignedEvents: 0,
@@ -48,24 +49,24 @@ export default function FacultyDashboard() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
 
   useEffect(() => {
-    fetchDashboardData();
+    void fetchDashboardData();
     
     // Subscribe to live updates
     const channel = supabase
       .channel('faculty-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        fetchLiveMatches();
-        fetchProvisionalMatches();
+        void fetchLiveMatches();
+        void fetchProvisionalMatches();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        fetchPendingTeams();
+        void fetchPendingTeams();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [universityId]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -79,15 +80,47 @@ export default function FacultyDashboard() {
   };
 
   const fetchStats = async () => {
-    const [assignmentsRes, teamsRes, matchesRes, budgetsRes] = await Promise.all([
-      supabase.from('coordinator_assignments').select('id', { count: 'exact' }).eq('user_id', user?.id || ''),
-      supabase.from('teams').select('id, status', { count: 'exact' }).eq('status', 'pending_approval'),
-      supabase.from('matches').select('id, status', { count: 'exact' }),
-      supabase.from('budgets').select('id', { count: 'exact' }).eq('submitted_by', user?.id || ''),
+    const [assignmentsRes, teamsRes, budgetsRes] = await Promise.all([
+      supabase.from('coordinator_assignments').select('id', { count: 'exact', head: true }).eq('user_id', user?.id || ''),
+      universityId
+        ? supabase
+            .from('teams')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pending_approval')
+            .eq('university_id', universityId)
+        : supabase.from('teams').select('id', { count: 'exact', head: true }).eq('id', '__none__'),
+      supabase.from('budgets').select('id', { count: 'exact', head: true }).eq('submitted_by', user?.id || ''),
     ]);
 
-    const provisionalCount = matchesRes.data?.filter(m => m.status === 'completed').length || 0;
-    const liveCount = matchesRes.data?.filter(m => m.status === 'live').length || 0;
+    let provisionalCount = 0;
+    let liveCount = 0;
+    let totalMatches = 0;
+
+    if (universityId) {
+      const tenantScope = await getTenantScope(universityId);
+      if (tenantScope.eventSportIds.length > 0) {
+        const [completedMatchesRes, liveMatchesRes, totalMatchesRes] = await Promise.all([
+          supabase
+            .from('matches')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'completed')
+            .in('event_sport_id', tenantScope.eventSportIds),
+          supabase
+            .from('matches')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'live')
+            .in('event_sport_id', tenantScope.eventSportIds),
+          supabase
+            .from('matches')
+            .select('id', { count: 'exact', head: true })
+            .in('event_sport_id', tenantScope.eventSportIds),
+        ]);
+
+        provisionalCount = completedMatchesRes.count || 0;
+        liveCount = liveMatchesRes.count || 0;
+        totalMatches = totalMatchesRes.count || 0;
+      }
+    }
 
     setStats({
       assignedEvents: assignmentsRes.count || 0,
@@ -95,15 +128,20 @@ export default function FacultyDashboard() {
       provisionalMatches: provisionalCount,
       pendingBudgets: budgetsRes.count || 0,
       liveMatches: liveCount,
-      totalMatches: matchesRes.count || 0,
+      totalMatches,
     });
   };
 
   const fetchPendingTeams = async () => {
+    if (!universityId) {
+      setPendingTeams([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('teams')
       .select(`
-        *,
+        id, name, status, created_at,
         university:universities(name, short_name),
         event_sport:event_sports(
           sport_category:sports_categories(name, icon),
@@ -111,6 +149,7 @@ export default function FacultyDashboard() {
         )
       `)
       .eq('status', 'pending_approval')
+      .eq('university_id', universityId)
       .order('created_at', { ascending: false })
       .limit(5);
 
@@ -118,17 +157,29 @@ export default function FacultyDashboard() {
   };
 
   const fetchProvisionalMatches = async () => {
+    if (!universityId) {
+      setProvisionalMatches([]);
+      return;
+    }
+
+    const tenantScope = await getTenantScope(universityId);
+    if (tenantScope.eventSportIds.length === 0) {
+      setProvisionalMatches([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('matches')
       .select(`
-        *,
+        id, status, completed_at, team_a_id, team_b_id, score_a, score_b, runs_a, runs_b,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
         team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
         venue:venues(name),
         event_sport:event_sports(sport_category:sports_categories(name, icon)),
-        scores(*)
+        scores(id, team_id, score_value)
       `)
       .eq('status', 'completed')
+      .in('event_sport_id', tenantScope.eventSportIds)
       .order('completed_at', { ascending: false })
       .limit(5);
 
@@ -136,17 +187,29 @@ export default function FacultyDashboard() {
   };
 
   const fetchLiveMatches = async () => {
+    if (!universityId) {
+      setLiveMatches([]);
+      return;
+    }
+
+    const tenantScope = await getTenantScope(universityId);
+    if (tenantScope.eventSportIds.length === 0) {
+      setLiveMatches([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('matches')
       .select(`
-        *,
+        id, status, started_at, scheduled_at, team_a_id, team_b_id, score_a, score_b, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, match_phase,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
         team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
         venue:venues(name),
         event_sport:event_sports(sport_category:sports_categories(name, icon)),
-        scores(*)
+        scores(id, team_id, score_value)
       `)
       .eq('status', 'live')
+      .in('event_sport_id', tenantScope.eventSportIds)
       .order('started_at', { ascending: false })
       .limit(4);
 

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Loader2, Plus, Minus, ArrowRight, Square, Trophy } from 'lucide-react';
 import { Match } from '@/types/database';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +64,7 @@ function runRate(runs: number, balls: number) {
 }
 
 export default function SportScoreDialog({ open, onOpenChange, match, userId, onUpdated, onEndMatch }: SportScoreDialogProps) {
+  const { universityId } = useAuth();
   const [scoreA, setScoreA] = useState(0);
   const [scoreB, setScoreB] = useState(0);
   const [footballMinute, setFootballMinute] = useState(0);
@@ -426,8 +428,8 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
     toast.success(`${winnerName} wins on penalties (${penaltyA}-${penaltyB})!`);
 
     // Advance winner in knockout brackets
-    if (isKnockout && winnerId) {
-      await tryCreateNextRoundMatch(match.id, match.event_sport_id, userId || '', match.scheduled_at);
+    if (isKnockout && winnerId && universityId) {
+      await tryCreateNextRoundMatch(match.id, match.event_sport_id, userId || '', match.scheduled_at, universityId);
     }
     // Update standings for group/league
     if (tournamentRound === 'group_stage' && winnerId && match.team_a_id && match.team_b_id) {

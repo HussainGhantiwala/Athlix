@@ -21,6 +21,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { getTenantScope } from '@/lib/tenant-scope';
 
 interface CoordinatorStats {
   liveMatches: number;
@@ -30,7 +31,7 @@ interface CoordinatorStats {
 }
 
 export default function CoordinatorDashboard() {
-  const { profile, user } = useAuth();
+  const { profile, user, universityId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<CoordinatorStats>({
     liveMatches: 0,
@@ -43,27 +44,27 @@ export default function CoordinatorDashboard() {
   const [pendingRegistrations, setPendingRegistrations] = useState<Registration[]>([]);
 
   useEffect(() => {
-    fetchDashboardData();
+    void fetchDashboardData();
     
     // Subscribe to live updates
     const channel = supabase
       .channel('coordinator-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        fetchLiveMatches();
-        fetchScheduledMatches();
+        void fetchLiveMatches();
+        void fetchScheduledMatches();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => {
-        fetchLiveMatches();
+        void fetchLiveMatches();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => {
-        fetchPendingRegistrations();
+        void fetchPendingRegistrations();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [universityId]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -77,14 +78,50 @@ export default function CoordinatorDashboard() {
   };
 
   const fetchStats = async () => {
-    const [matchesRes, registrationsRes, teamsRes] = await Promise.all([
-      supabase.from('matches').select('id, status', { count: 'exact' }),
-      supabase.from('registrations').select('id, status', { count: 'exact' }).eq('status', 'pending'),
-      supabase.from('teams').select('id', { count: 'exact' }),
+    if (!universityId) {
+      setStats({
+        liveMatches: 0,
+        scheduledMatches: 0,
+        pendingRegistrations: 0,
+        teamsManaged: 0,
+      });
+      return;
+    }
+
+    const tenantScope = await getTenantScope(universityId);
+
+    const [registrationsRes, teamsRes] = await Promise.all([
+      supabase
+        .from('registrations')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .eq('university_id', universityId),
+      supabase
+        .from('teams')
+        .select('id', { count: 'exact', head: true })
+        .eq('university_id', universityId),
     ]);
 
-    const liveCount = matchesRes.data?.filter(m => m.status === 'live').length || 0;
-    const scheduledCount = matchesRes.data?.filter(m => m.status === 'scheduled').length || 0;
+    let liveCount = 0;
+    let scheduledCount = 0;
+
+    if (tenantScope.eventSportIds.length > 0) {
+      const [liveMatchesRes, scheduledMatchesRes] = await Promise.all([
+        supabase
+          .from('matches')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'live')
+          .in('event_sport_id', tenantScope.eventSportIds),
+        supabase
+          .from('matches')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'scheduled')
+          .in('event_sport_id', tenantScope.eventSportIds),
+      ]);
+
+      liveCount = liveMatchesRes.count || 0;
+      scheduledCount = scheduledMatchesRes.count || 0;
+    }
 
     setStats({
       liveMatches: liveCount,
@@ -95,17 +132,29 @@ export default function CoordinatorDashboard() {
   };
 
   const fetchLiveMatches = async () => {
+    if (!universityId) {
+      setLiveMatches([]);
+      return;
+    }
+
+    const tenantScope = await getTenantScope(universityId);
+    if (tenantScope.eventSportIds.length === 0) {
+      setLiveMatches([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('matches')
       .select(`
-        *,
+        id, status, started_at, scheduled_at, team_a_id, team_b_id, score_a, score_b, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, match_phase,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
         team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
         venue:venues(name),
         event_sport:event_sports(sport_category:sports_categories(name, icon)),
-        scores(*)
+        scores(id, team_id, score_value)
       `)
       .eq('status', 'live')
+      .in('event_sport_id', tenantScope.eventSportIds)
       .order('started_at', { ascending: false })
       .limit(6);
 
@@ -113,17 +162,28 @@ export default function CoordinatorDashboard() {
   };
 
   const fetchScheduledMatches = async () => {
+    if (!universityId) {
+      setScheduledMatches([]);
+      return;
+    }
+
+    const tenantScope = await getTenantScope(universityId);
+    if (tenantScope.eventSportIds.length === 0) {
+      setScheduledMatches([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('matches')
       .select(`
-        *,
+        id, status, scheduled_at, team_a_id, team_b_id,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
         team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
         venue:venues(name),
-        event_sport:event_sports(sport_category:sports_categories(name, icon)),
-        scores(*)
+        event_sport:event_sports(sport_category:sports_categories(name, icon))
       `)
       .eq('status', 'scheduled')
+      .in('event_sport_id', tenantScope.eventSportIds)
       .gte('scheduled_at', new Date().toISOString())
       .order('scheduled_at')
       .limit(5);
@@ -132,10 +192,15 @@ export default function CoordinatorDashboard() {
   };
 
   const fetchPendingRegistrations = async () => {
+    if (!universityId) {
+      setPendingRegistrations([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('registrations')
       .select(`
-        *,
+        id, status, created_at,
         profile:profiles!registrations_user_id_fkey(full_name, email),
         event_sport:event_sports(
           sport_category:sports_categories(name, icon),
@@ -143,6 +208,7 @@ export default function CoordinatorDashboard() {
         )
       `)
       .eq('status', 'pending')
+      .eq('university_id', universityId)
       .order('created_at', { ascending: false })
       .limit(5);
 

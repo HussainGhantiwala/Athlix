@@ -1,6 +1,13 @@
 import { supabase } from '@/integrations/supabase/client';
 import { Team } from '@/types/database';
 
+function requireUniversityId(universityId: string | null | undefined): string {
+  if (!universityId) {
+    throw new Error('Cannot create matches: university_id is missing from your profile.');
+  }
+  return universityId;
+}
+
 function nextPowerOf2(n: number): number {
   let p = 1;
   while (p < n) p *= 2;
@@ -100,11 +107,14 @@ export async function generateKnockoutMatches(
   eventId: string,
   teams: Team[],
   userId: string,
+  universityId: string,
   scheduledAt: string
 ): Promise<GenerateResult> {
   if (teams.length < 2) {
     return { success: false, error: 'Need at least 2 teams for knockout.' };
   }
+
+  const tenantUniversityId = requireUniversityId(universityId);
 
   const bracketSize = nextPowerOf2(teams.length);
   const round1MatchCount = bracketSize / 2;
@@ -127,6 +137,7 @@ export async function generateKnockoutMatches(
     matchInserts.push({
       event_sport_id: eventSportId,
       event_id: eventId,
+      university_id: tenantUniversityId,
       sport_id: (teamA as any)?.sport_id ?? (teamB as any)?.sport_id ?? null,
       team_a_id: teamA?.id || null,
       team_b_id: teamB?.id || null,
@@ -142,16 +153,22 @@ export async function generateKnockoutMatches(
     });
   }
 
-  const { data, error } = await supabase
-    .from('matches')
-    .insert(matchInserts)
-    .select('id, team_a_id, team_b_id, match_number');
+  const { error } = await supabase.from('matches').insert(matchInserts);
 
   if (error) return { success: false, error: error.message };
 
+  const { data: insertedRound, error: fetchError } = await supabase
+    .from('matches')
+    .select('id, team_a_id, team_b_id, match_number')
+    .eq('event_sport_id', eventSportId)
+    .eq('round', roundLabel)
+    .order('match_number');
+
+  if (fetchError) return { success: false, error: fetchError.message };
+
   // Auto-advance BYE matches
-  if (data) {
-    for (const m of data) {
+  if (insertedRound) {
+    for (const m of insertedRound) {
       const hasBye = (!m.team_a_id && m.team_b_id) || (m.team_a_id && !m.team_b_id);
       if (hasBye) {
         const winnerId = m.team_a_id || m.team_b_id;
@@ -165,7 +182,7 @@ export async function generateKnockoutMatches(
         }).eq('id', m.id);
 
         // Try to create next round match if pair is also done
-        await tryCreateNextRoundMatch(m.id, eventSportId, userId, scheduledAt);
+        await tryCreateNextRoundMatch(m.id, eventSportId, userId, scheduledAt, tenantUniversityId);
       }
     }
   }
@@ -181,8 +198,10 @@ export async function tryCreateNextRoundMatch(
   completedMatchId: string,
   eventSportId: string,
   userId: string,
-  scheduledAt: string
+  scheduledAt: string,
+  universityId: string
 ): Promise<string | null> {
+  const tenantUniversityId = requireUniversityId(universityId);
   // Get completed match
   const { data: match } = await supabase
     .from('matches')
@@ -236,9 +255,10 @@ export async function tryCreateNextRoundMatch(
   const teamAId = isFirst ? match.winner_team_id : (pairMatch.winner_team_id || null);
   const teamBId = isFirst ? (pairMatch.winner_team_id || null) : match.winner_team_id;
 
-  const { data: newMatch, error } = await supabase.from('matches').insert({
+  const { error: insertError } = await supabase.from('matches').insert({
     event_sport_id: eventSportId,
     event_id: match.event_id ?? null,
+    university_id: (match as any).university_id ?? tenantUniversityId,
     sport_id: match.sport_id ?? null,
     team_a_id: teamAId,
     team_b_id: teamBId,
@@ -251,9 +271,19 @@ export async function tryCreateNextRoundMatch(
     match_phase: MATCH_PHASE_NOT_STARTED,
     next_match_id: null,
     created_by: userId,
-  }).select('id').single();
+  });
 
-  if (error || !newMatch) return null;
+  if (insertError) return null;
+
+  const { data: newMatch, error: lookupError } = await supabase
+    .from('matches')
+    .select('id')
+    .eq('event_sport_id', eventSportId)
+    .eq('round', nextRoundLabel)
+    .eq('match_number', nextMatchNumber)
+    .maybeSingle();
+
+  if (lookupError || !newMatch?.id) return null;
 
   // Update both feeder matches to point at the created next match.
   await Promise.all([
@@ -283,11 +313,14 @@ export async function generateGroupMatches(
   eventId: string,
   teams: Team[],
   userId: string,
+  universityId: string,
   scheduledAt: string
 ): Promise<GenerateResult> {
   if (teams.length < 4) {
     return { success: false, error: 'Need at least 4 teams for group stage.' };
   }
+
+  const tenantUniversityId = requireUniversityId(universityId);
 
   const numGroups = Math.max(2, Math.ceil(teams.length / 4));
   const groupNames = 'ABCDEFGHIJKLMNOP'.split('').slice(0, numGroups);
@@ -311,6 +344,7 @@ export async function generateGroupMatches(
         matchInserts.push({
           event_sport_id: eventSportId,
           event_id: eventId,
+          university_id: tenantUniversityId,
           sport_id: (groupTeams[i] as any)?.sport_id ?? (groupTeams[j] as any)?.sport_id ?? null,
           team_a_id: groupTeams[i].id,
           team_b_id: groupTeams[j].id,
@@ -350,11 +384,14 @@ export async function generateLeagueMatches(
   eventId: string,
   teams: Team[],
   userId: string,
+  universityId: string,
   scheduledAt: string
 ): Promise<GenerateResult> {
   if (teams.length < 2) {
     return { success: false, error: 'Need at least 2 teams for league.' };
   }
+
+  const tenantUniversityId = requireUniversityId(universityId);
 
   const matchInserts: any[] = [];
   let matchNum = 1;
@@ -364,6 +401,7 @@ export async function generateLeagueMatches(
       matchInserts.push({
         event_sport_id: eventSportId,
         event_id: eventId,
+        university_id: tenantUniversityId,
         sport_id: (teams[i] as any)?.sport_id ?? (teams[j] as any)?.sport_id ?? null,
         team_a_id: teams[i].id,
         team_b_id: teams[j].id,
@@ -438,6 +476,7 @@ export async function generateKnockoutFromGroupStage(
   eventSportId: string,
   eventId: string,
   userId: string,
+  universityId: string,
   scheduledAt: string
 ): Promise<GenerateResult> {
   const { data: standings } = await supabase
@@ -473,5 +512,5 @@ export async function generateKnockoutFromGroupStage(
     return { success: false, error: 'Not enough qualified teams.' };
   }
 
-  return generateKnockoutMatches(eventSportId, eventId, qualifiedTeams as any[], userId, scheduledAt);
+  return generateKnockoutMatches(eventSportId, eventId, qualifiedTeams as any[], userId, universityId, scheduledAt);
 }

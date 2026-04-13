@@ -45,14 +45,26 @@ interface NavItem {
 }
 
 // Role-specific navigation items
-const getNavItemsForRole = (role: AppRole | null): NavItem[] => {
+const getNavItemsForRole = (role: AppRole | null, isSuperAdmin: boolean): NavItem[] => {
+  if (isSuperAdmin) {
+    return [
+      { label: 'Dashboard', href: '/super-admin', icon: <LayoutDashboard className="h-5 w-5" /> },
+      { label: 'Universities', href: '/admin/universities', icon: <Building2 className="h-5 w-5" /> },
+      { label: 'Events', href: '/admin/events', icon: <Calendar className="h-5 w-5" /> },
+      { label: 'Teams', href: '/admin/teams', icon: <Users className="h-5 w-5" /> },
+      { label: 'Matches', href: '/admin/matches', icon: <Target className="h-5 w-5" /> },
+      { label: 'Budgets', href: '/admin/budgets', icon: <DollarSign className="h-5 w-5" /> },
+      { label: 'Analytics', href: '/admin/analytics', icon: <BarChart3 className="h-5 w-5" /> },
+      { label: 'Reports', href: '/admin/reports', icon: <FileText className="h-5 w-5" /> },
+    ];
+  }
+
   switch (role) {
     case 'admin':
       return [
         { label: 'Dashboard', href: '/admin', icon: <LayoutDashboard className="h-5 w-5" /> },
-        { label: 'Universities', href: '/admin/universities', icon: <Building2 className="h-5 w-5" /> },
         { label: 'Events', href: '/admin/events', icon: <Calendar className="h-5 w-5" /> },
-        { label: 'Coordinators', href: '/admin/coordinators', icon: <UserPlus className="h-5 w-5" /> },
+        { label: 'Users & Invites', href: '/admin/coordinators', icon: <UserPlus className="h-5 w-5" /> },
         { label: 'Form Approval', href: '/admin/form-approval', icon: <ListChecks className="h-5 w-5" /> },
         { label: 'Submissions', href: '/admin/submissions', icon: <Inbox className="h-5 w-5" /> },
         { label: 'Rule Book', href: '/admin/rule-book', icon: <BookOpen className="h-5 w-5" /> },
@@ -104,21 +116,29 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { profile, role, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+  const { profile, role, university, signOut, isSuperAdmin } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const navItems = getNavItemsForRole(role);
+  const navItems = getNavItemsForRole(role, isSuperAdmin);
 
   const handleSignOut = async () => {
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
     await signOut();
-    navigate('/');
+    navigate('/', { replace: true });
   };
 
   const getRoleBadgeColor = () => {
     switch (role) {
       case 'admin':
         return 'bg-red-500/20 text-red-300';
+      case 'super_admin':
+        return 'bg-violet-500/20 text-violet-200';
       case 'faculty':
         return 'bg-blue-500/20 text-blue-300';
       case 'student_coordinator':
@@ -131,7 +151,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const getRoleLabel = () => {
     switch (role) {
       case 'admin':
-        return 'Sports Director';
+        return 'University Admin';
+      case 'super_admin':
+        return 'Super Admin';
       case 'faculty':
         return 'Faculty Coordinator';
       case 'student_coordinator':
@@ -175,7 +197,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <h1 className="font-display font-bold text-lg text-sidebar-foreground">
                 Athletix
               </h1>
-              <p className="text-xs text-sidebar-foreground/60">{getRoleLabel()}</p>
+              <p className="text-xs text-sidebar-foreground/60">
+                {university?.short_name || getRoleLabel()}
+              </p>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -306,9 +330,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
+                <DropdownMenuItem onClick={handleSignOut} className="text-destructive" disabled={signingOut}>
                   <LogOut className="mr-2 h-4 w-4" />
-                  Sign out
+                  {signingOut ? 'Signing out...' : 'Sign out'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

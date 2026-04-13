@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { TeamStanding } from '@/types/database';
 import { Loader2, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { measureWithTimeout, REQUEST_TIMEOUT_MS } from '@/lib/performance';
 
 interface StandingsTableProps {
   eventSportId: string;
@@ -10,42 +11,72 @@ interface StandingsTableProps {
 
 function StandingsTableInner({ eventSportId }: StandingsTableProps) {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [groups, setGroups] = useState<Map<string, TeamStanding[]>>(new Map());
 
   useEffect(() => {
-    fetchStandings();
+    void fetchStandings();
     const channel = supabase
       .channel(`standings-${eventSportId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'team_standings' }, () => fetchStandings())
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'team_standings', filter: `event_sport_id=eq.${eventSportId}` },
+        () => void fetchStandings()
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [eventSportId]);
 
   const fetchStandings = async () => {
-    const { data } = await supabase
-      .from('team_standings')
-      .select('*')
-      .eq('event_sport_id', eventSportId)
-      .order('group_name')
-      .order('points', { ascending: false })
-      .order('goal_difference', { ascending: false });
+    setLoading(true);
+    setError(null);
 
-    if (data) {
+    try {
+      const { data, error: fetchError } = await measureWithTimeout(`standings ${eventSportId}`, async () =>
+        supabase
+          .from('team_standings')
+          .select('id, event_id, event_sport_id, group_name, team_id, team_name, played, won, lost, draw, points, goal_difference, created_at, updated_at')
+          .eq('event_sport_id', eventSportId)
+          .order('group_name')
+          .order('points', { ascending: false })
+          .order('goal_difference', { ascending: false })
+          .limit(64),
+        REQUEST_TIMEOUT_MS
+      );
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
       const grouped = new Map<string, TeamStanding[]>();
-      (data as unknown as TeamStanding[]).forEach(s => {
-        const g = s.group_name || 'League';
-        if (!grouped.has(g)) grouped.set(g, []);
-        grouped.get(g)!.push(s);
+      ((data as unknown as TeamStanding[]) || []).forEach((standing) => {
+        const groupName = standing.group_name || 'League';
+        if (!grouped.has(groupName)) grouped.set(groupName, []);
+        grouped.get(groupName)!.push(standing);
       });
       setGroups(grouped);
+    } catch (fetchError: any) {
+      console.error('Failed to load standings:', fetchError);
+      setError(fetchError.message || 'Unable to load standings.');
+      setGroups(new Map());
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+        <p className="text-muted-foreground">{error}</p>
       </div>
     );
   }

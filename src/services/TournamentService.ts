@@ -30,6 +30,7 @@ type MatchResult = 'pending' | 'winner' | 'draw';
 interface GeneratedMatchInsert {
   id: string;
   event_id: string;
+  university_id: string;
   event_sport_id: string | null;
   sport_id: string | null;
   participant_a_name: string | null;
@@ -453,6 +454,39 @@ export class TournamentService {
   }
 
   static async generateMatches(eventId: string, type: TournamentType = 'knockout') {
+    const {
+      data: { user: authUser },
+      error: authUserError,
+    } = await supabase.auth.getUser();
+
+    if (authUserError || !authUser) {
+      throw authUserError || new Error('Not authenticated');
+    }
+
+    const { data: actorProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('university_id')
+      .eq('id', authUser.id)
+      .single();
+
+    if (profileError || !actorProfile?.university_id) {
+      throw profileError || new Error('Your profile is missing university_id. Cannot create matches.');
+    }
+
+    const { data: eventData, error: eventError } = await supabase
+      .from('events')
+      .select('id, university_id')
+      .eq('id', eventId)
+      .single();
+
+    if (eventError || !eventData?.university_id) {
+      throw eventError || new Error('Unable to resolve event university');
+    }
+
+    if (eventData.university_id !== actorProfile.university_id) {
+      throw new Error('Event does not belong to your university.');
+    }
+
     const { data: registrations, error } = await supabase
       .from('registration_submissions')
       .select('id, event_id, sport_id, user_id, team_id, team_name, created_at')
@@ -491,6 +525,11 @@ export class TournamentService {
     } else {
       matchesToInsert = TournamentService.buildKnockoutMatches(eventId, participantSeeds);
     }
+
+    matchesToInsert = matchesToInsert.map((match) => ({
+      ...match,
+      university_id: actorProfile.university_id,
+    }));
 
     const { error: insertError } = await supabase
       .from('matches')

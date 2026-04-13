@@ -19,7 +19,7 @@ import TossModal from './TossModal';
 const KNOCKOUT_ROUNDS = new Set(['round_of_16', 'quarterfinal', 'semifinal', 'final']);
 
 export default function ScoreControlPanel() {
-  const { user } = useAuth();
+  const { user, universityId } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [liveMatches, setLiveMatches] = useState<Match[]>([]);
@@ -240,8 +240,14 @@ export default function ScoreControlPanel() {
       resultMsg = `${winnerName} won!`;
     }
 
-    if (isKnockout && finalWinnerId) {
-      const nextMatchId = await tryCreateNextRoundMatch(match.id, match.event_sport_id, user?.id || '', match.scheduled_at);
+    if (isKnockout && finalWinnerId && universityId) {
+      const nextMatchId = await tryCreateNextRoundMatch(
+        match.id,
+        match.event_sport_id,
+        user?.id || '',
+        match.scheduled_at,
+        universityId
+      );
       toast.success(nextMatchId ? `${resultMsg} â€” Winner advanced to next round!` : `${resultMsg} â€” Waiting for other matches.`);
     } else if (round === 'group_stage' && match.team_a_id && match.team_b_id) {
       await updateStandingsAfterMatch(match.id, match.event_sport_id, match.team_a_id, match.team_b_id, finalScoreA, finalScoreB);
@@ -542,8 +548,14 @@ export default function ScoreControlPanel() {
               .single();
             if (freshMatch && freshMatch.status === 'completed' && freshMatch.match_phase === 'completed' && freshMatch.winner_team_id) {
               // Trigger bracket progression
-              if (KNOCKOUT_ROUNDS.has(String(freshMatch.round || '').toLowerCase())) {
-                await tryCreateNextRoundMatch(selectedMatch.id, freshMatch.event_sport_id, user?.id || '', freshMatch.scheduled_at);
+              if (KNOCKOUT_ROUNDS.has(String(freshMatch.round || '').toLowerCase()) && universityId) {
+                await tryCreateNextRoundMatch(
+                  selectedMatch.id,
+                  freshMatch.event_sport_id,
+                  user?.id || '',
+                  freshMatch.scheduled_at,
+                  universityId
+                );
               } else if (String(freshMatch.round || '').toLowerCase() === 'group_stage' && freshMatch.team_a_id && freshMatch.team_b_id) {
                 await updateStandingsAfterMatch(
                   selectedMatch.id,

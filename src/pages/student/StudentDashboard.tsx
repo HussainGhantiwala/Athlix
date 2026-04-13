@@ -20,6 +20,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { UpcomingEventsSection } from '@/components/student/UpcomingEventsSection';
+import { getTenantScope } from '@/lib/tenant-scope';
 
 interface StudentStats {
   myRegistrations: number;
@@ -29,7 +30,7 @@ interface StudentStats {
 }
 
 export default function StudentDashboard() {
-  const { profile, user } = useAuth();
+  const { profile, user, universityId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<StudentStats>({
     myRegistrations: 0,
@@ -44,16 +45,16 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     if (user?.id) {
-      fetchDashboardData();
+      void fetchDashboardData();
       
       // Subscribe to live updates
       const channel = supabase
         .channel('student-updates')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-          fetchLiveMatches();
+          void fetchLiveMatches();
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => {
-          fetchLiveMatches();
+          void fetchLiveMatches();
         })
         .subscribe();
 
@@ -61,7 +62,7 @@ export default function StudentDashboard() {
         supabase.removeChannel(channel);
       };
     }
-  }, [user?.id]);
+  }, [universityId, user?.id]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -76,18 +77,36 @@ export default function StudentDashboard() {
   };
 
   const fetchStats = async () => {
-    const [registrationsRes, teamsRes, eventsRes, matchesRes] = await Promise.all([
-      supabase.from('registrations').select('id', { count: 'exact' }).eq('user_id', user?.id || ''),
-      supabase.from('team_members').select('id', { count: 'exact' }).eq('user_id', user?.id || ''),
-      supabase.from('events').select('id', { count: 'exact' }).in('status', ['approved', 'active']),
-      supabase.from('matches').select('id', { count: 'exact' }).eq('status', 'live'),
+    const [registrationsRes, teamsRes, eventsRes] = await Promise.all([
+      supabase.from('registrations').select('id', { count: 'exact', head: true }).eq('user_id', user?.id || ''),
+      supabase.from('team_members').select('id', { count: 'exact', head: true }).eq('user_id', user?.id || ''),
+      universityId
+        ? supabase
+            .from('events')
+            .select('id', { count: 'exact', head: true })
+            .in('status', ['approved', 'active'])
+            .eq('university_id', universityId)
+        : supabase.from('events').select('id', { count: 'exact', head: true }).eq('id', '__none__'),
     ]);
+
+    let liveMatchCount = 0;
+    if (universityId) {
+      const tenantScope = await getTenantScope(universityId);
+      if (tenantScope.eventSportIds.length > 0) {
+        const { count } = await supabase
+          .from('matches')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'live')
+          .in('event_sport_id', tenantScope.eventSportIds);
+        liveMatchCount = count || 0;
+      }
+    }
 
     setStats({
       myRegistrations: registrationsRes.count || 0,
       myTeams: teamsRes.count || 0,
       upcomingEvents: eventsRes.count || 0,
-      liveMatches: matchesRes.count || 0,
+      liveMatches: liveMatchCount,
     });
   };
 
@@ -128,17 +147,29 @@ export default function StudentDashboard() {
   };
 
   const fetchLiveMatches = async () => {
+    if (!universityId) {
+      setLiveMatches([]);
+      return;
+    }
+
+    const tenantScope = await getTenantScope(universityId);
+    if (tenantScope.eventSportIds.length === 0) {
+      setLiveMatches([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('matches')
       .select(`
-        *,
+        id, status, started_at, scheduled_at, team_a_id, team_b_id, score_a, score_b, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, match_phase,
         team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
         team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
         venue:venues(name),
         event_sport:event_sports(sport_category:sports_categories(name, icon)),
-        scores(*)
+        scores(id, team_id, score_value)
       `)
       .eq('status', 'live')
+      .in('event_sport_id', tenantScope.eventSportIds)
       .order('started_at', { ascending: false })
       .limit(6);
 
@@ -146,10 +177,16 @@ export default function StudentDashboard() {
   };
 
   const fetchUpcomingEvents = async () => {
+    if (!universityId) {
+      setUpcomingEvents([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('events')
-      .select(`*, university:universities(short_name)`)
+      .select(`id, university_id, name, start_date, end_date, status, tournament_type, banner_url, university:universities(short_name)`)
       .in('status', ['approved', 'active'])
+      .eq('university_id', universityId)
       .gte('end_date', new Date().toISOString().split('T')[0])
       .order('start_date')
       .limit(4);

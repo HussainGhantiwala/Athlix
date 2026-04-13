@@ -336,6 +336,7 @@ export type Database = {
           created_by: string | null
           current_editor_id: string | null
           editor_locked_at: string | null
+          event_id: string | null
           event_sport_id: string
           finalized_at: string | null
           finalized_by: string | null
@@ -363,6 +364,7 @@ export type Database = {
           toss_decision: string | null
           toss_winner_id: string | null
           updated_at: string
+          university_id: string | null
           venue_id: string | null
           wickets_a: number
           wickets_b: number
@@ -378,6 +380,7 @@ export type Database = {
           created_by?: string | null
           current_editor_id?: string | null
           editor_locked_at?: string | null
+          event_id?: string | null
           event_sport_id: string
           finalized_at?: string | null
           finalized_by?: string | null
@@ -405,6 +408,7 @@ export type Database = {
           toss_decision?: string | null
           toss_winner_id?: string | null
           updated_at?: string
+          university_id?: string | null
           venue_id?: string | null
           wickets_a?: number
           wickets_b?: number
@@ -420,6 +424,7 @@ export type Database = {
           created_by?: string | null
           current_editor_id?: string | null
           editor_locked_at?: string | null
+          event_id?: string | null
           event_sport_id?: string
           finalized_at?: string | null
           finalized_by?: string | null
@@ -447,6 +452,7 @@ export type Database = {
           toss_decision?: string | null
           toss_winner_id?: string | null
           updated_at?: string
+          university_id?: string | null
           venue_id?: string | null
           wickets_a?: number
           wickets_b?: number
@@ -518,6 +524,41 @@ export type Database = {
           },
         ]
       }
+      invites: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          status: Database["public"]["Enums"]["invite_status"]
+          university_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invite_status"]
+          university_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invite_status"]
+          university_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invites_university_id_fkey"
+            columns: ["university_id"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -526,6 +567,7 @@ export type Database = {
           full_name: string
           id: string
           phone: string | null
+          university_id: string | null
           updated_at: string
         }
         Insert: {
@@ -535,6 +577,7 @@ export type Database = {
           full_name: string
           id: string
           phone?: string | null
+          university_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -544,9 +587,18 @@ export type Database = {
           full_name?: string
           id?: string
           phone?: string | null
+          university_id?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_university_id_fkey"
+            columns: ["university_id"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       registration_forms: {
         Row: {
@@ -1132,6 +1184,7 @@ export type Database = {
           country: string | null
           created_at: string
           created_by: string | null
+          domain: string | null
           id: string
           is_active: boolean
           logo_url: string | null
@@ -1146,6 +1199,7 @@ export type Database = {
           country?: string | null
           created_at?: string
           created_by?: string | null
+          domain?: string | null
           id?: string
           is_active?: boolean
           logo_url?: string | null
@@ -1160,6 +1214,7 @@ export type Database = {
           country?: string | null
           created_at?: string
           created_by?: string | null
+          domain?: string | null
           id?: string
           is_active?: boolean
           logo_url?: string | null
@@ -1175,21 +1230,32 @@ export type Database = {
           created_at: string
           id: string
           role: Database["public"]["Enums"]["app_role"]
+          university_id: string | null
           user_id: string
         }
         Insert: {
           created_at?: string
           id?: string
           role: Database["public"]["Enums"]["app_role"]
+          university_id?: string | null
           user_id: string
         }
         Update: {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          university_id?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_university_id_fkey"
+            columns: ["university_id"]
+            isOneToOne: false
+            referencedRelation: "universities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       venues: {
         Row: {
@@ -1262,6 +1328,10 @@ export type Database = {
         }
         Returns: Json
       }
+      accept_invite: {
+        Args: { _invite_id: string }
+        Returns: Json
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
@@ -1273,6 +1343,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      register_current_user_university: {
+        Args: { _domain: string; _name: string }
+        Returns: Json
+      }
+      sync_user_membership: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
       is_event_coordinator: {
         Args: { _event_id: string; _user_id: string }
         Returns: boolean
@@ -1283,7 +1361,12 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "faculty" | "student_coordinator" | "student"
+      app_role:
+        | "super_admin"
+        | "admin"
+        | "faculty"
+        | "student_coordinator"
+        | "student"
       budget_status: "draft" | "submitted" | "approved" | "rejected"
       event_status:
         | "draft"
@@ -1292,6 +1375,7 @@ export type Database = {
         | "active"
         | "completed"
         | "cancelled"
+      invite_status: "pending" | "accepted" | "rejected"
       match_status:
         | "scheduled"
         | "live"
@@ -1434,7 +1518,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "faculty", "student_coordinator", "student"],
+      app_role: [
+        "super_admin",
+        "admin",
+        "faculty",
+        "student_coordinator",
+        "student",
+      ],
       budget_status: ["draft", "submitted", "approved", "rejected"],
       event_status: [
         "draft",
@@ -1444,6 +1534,7 @@ export const Constants = {
         "completed",
         "cancelled",
       ],
+      invite_status: ["pending", "accepted", "rejected"],
       match_status: [
         "scheduled",
         "live",

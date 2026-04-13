@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
+import { measureWithTimeout, REQUEST_TIMEOUT_MS } from '@/lib/performance';
 
 interface BracketViewProps {
   eventSportId: string;
@@ -46,6 +47,7 @@ const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5];
 
 export default function BracketView({ eventSportId }: BracketViewProps) {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<BracketMatch[]>([]);
   const prevWinnersRef = useRef<Set<string>>(new Set());
   const [newlyAdvanced, setNewlyAdvanced] = useState<Set<string>>(new Set());
@@ -59,49 +61,74 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchBracket();
+    void fetchBracket();
     const channel = supabase
       .channel(`bracket-${eventSportId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => fetchBracket())
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches', filter: `event_sport_id=eq.${eventSportId}` },
+        () => void fetchBracket()
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [eventSportId]);
 
   const fetchBracket = async () => {
-    const { data } = await supabase
-      .from('matches')
-      .select(`
-        id, status, match_number, round, round_number, phase, group_name, match_phase, scheduled_at,
-        team_a_id, team_b_id, winner_id, winner_team_id, next_match_id,
-        score_a, score_b, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, result_status,
-        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
-        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
-        event_sport:event_sports!matches_event_sport_id_fkey(sport_category:sports_categories(name, icon))
-      `)
-      .eq('event_sport_id', eventSportId)
-      .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final', 'Quarter Final', 'Semi Final', 'Final'])
-      .order('match_number');
+    setLoading(true);
+    setError(null);
 
-    if (data) {
-      const casted = data as unknown as BracketMatch[];
+    try {
+      const { data, error: fetchError } = await measureWithTimeout(`bracket ${eventSportId}`, async () =>
+        supabase
+          .from('matches')
+          .select(`
+            id, status, match_number, round, round_number, phase, group_name, match_phase, scheduled_at,
+            team_a_id, team_b_id, winner_id, winner_team_id, next_match_id,
+            score_a, score_b, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, result_status,
+            team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+            team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+            event_sport:event_sports!matches_event_sport_id_fkey(sport_category:sports_categories(name, icon))
+          `)
+          .eq('event_sport_id', eventSportId)
+          .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final', 'Quarter Final', 'Semi Final', 'Final'])
+          .order('match_number')
+          .limit(32),
+        REQUEST_TIMEOUT_MS
+      );
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      const casted = (data as unknown as BracketMatch[]) || [];
       setMatches(casted);
 
       const currentWinners = new Set<string>();
-      casted.forEach(m => {
-        const winnerId = (m as any).winner_id || m.winner_team_id;
-        if (winnerId) currentWinners.add(`${m.id}-${winnerId}`);
+      casted.forEach((match) => {
+        const winnerId = (match as any).winner_id || match.winner_team_id;
+        if (winnerId) currentWinners.add(`${match.id}-${winnerId}`);
       });
+
       const fresh = new Set<string>();
-      currentWinners.forEach(key => {
-        if (!prevWinnersRef.current.has(key)) fresh.add(key);
+      currentWinners.forEach((key) => {
+        if (!prevWinnersRef.current.has(key)) {
+          fresh.add(key);
+        }
       });
+
       if (fresh.size > 0) {
         setNewlyAdvanced(fresh);
-        setTimeout(() => setNewlyAdvanced(new Set()), 2500);
+        window.setTimeout(() => setNewlyAdvanced(new Set()), 2500);
       }
+
       prevWinnersRef.current = currentWinners;
+    } catch (fetchError: any) {
+      console.error('Failed to load bracket:', fetchError);
+      setError(fetchError.message || 'Unable to load the bracket.');
+      setMatches([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Zoom handlers
@@ -217,6 +244,15 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+        <p className="text-muted-foreground">{error}</p>
       </div>
     );
   }

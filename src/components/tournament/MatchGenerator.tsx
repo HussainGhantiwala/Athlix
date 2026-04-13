@@ -36,7 +36,7 @@ interface MatchGeneratorProps {
 }
 
 export default function MatchGenerator({ event, onGenerated }: MatchGeneratorProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showSportSelect, setShowSportSelect] = useState(false);
   const [eventSports, setEventSports] = useState<any[]>([]);
@@ -78,7 +78,12 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
   };
 
   const handleGenerate = async (type: TournamentType) => {
-    if (!user?.id) return;
+    if (!user?.id || !profile?.university_id) {
+      toast.error('Your account is missing university context.');
+      return;
+    }
+
+    const actorUniversityId = profile.university_id;
     setGenerating(true);
 
     try {
@@ -125,13 +130,13 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
       let result;
       switch (type) {
         case 'knockout':
-          result = await generateKnockoutMatches(selectedSportId, event.id, teams as Team[], user.id, scheduledAt);
+          result = await generateKnockoutMatches(selectedSportId, event.id, teams as Team[], user.id, actorUniversityId, scheduledAt);
           break;
         case 'group':
-          result = await generateGroupMatches(selectedSportId, event.id, teams as Team[], user.id, scheduledAt);
+          result = await generateGroupMatches(selectedSportId, event.id, teams as Team[], user.id, actorUniversityId, scheduledAt);
           break;
         case 'league':
-          result = await generateLeagueMatches(selectedSportId, event.id, teams as Team[], user.id, scheduledAt);
+          result = await generateLeagueMatches(selectedSportId, event.id, teams as Team[], user.id, actorUniversityId, scheduledAt);
           break;
       }
 

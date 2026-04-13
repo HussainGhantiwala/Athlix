@@ -1,9 +1,10 @@
-export type AppRole = 'admin' | 'faculty' | 'student_coordinator' | 'student';
+export type AppRole = 'super_admin' | 'admin' | 'faculty' | 'student_coordinator' | 'student';
 export type EventStatus = 'draft' | 'pending_approval' | 'approved' | 'active' | 'completed' | 'cancelled';
 export type MatchStatus = 'scheduled' | 'live' | 'completed' | 'cancelled' | 'completed_provisional' | 'finalized';
 export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
 export type TeamStatus = 'forming' | 'pending_approval' | 'approved' | 'locked';
 export type BudgetStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+export type InviteStatus = 'pending' | 'accepted' | 'rejected';
 export type TournamentType = 'knockout' | 'group' | 'league';
 export type ResultStatus = 'pending' | 'completed' | 'advanced' | 'eliminated' | 'draw' | 'final';
 
@@ -11,15 +12,18 @@ export interface Profile {
   id: string;
   email: string;
   full_name: string;
+  university_id?: string | null;
   avatar_url?: string;
   phone?: string;
   created_at: string;
   updated_at: string;
+  university?: University | null;
 }
 
 export interface UserRole {
   id: string;
   user_id: string;
+  university_id?: string | null;
   role: AppRole;
   created_at: string;
 }
@@ -27,6 +31,7 @@ export interface UserRole {
 export interface University {
   id: string;
   name: string;
+  domain?: string | null;
   short_name: string;
   logo_url?: string;
   address?: string;
@@ -37,6 +42,16 @@ export interface University {
   created_by?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface Invite {
+  id: string;
+  email: string;
+  role: AppRole;
+  university_id: string;
+  status: InviteStatus;
+  created_at: string;
+  university?: University | null;
 }
 
 export interface Event {
@@ -164,6 +179,9 @@ export interface Venue {
 
 export interface Match {
   id: string;
+  university_id?: string | null;
+  event_id?: string | null;
+  sport_id?: string | null;
   event_sport_id: string;
   venue_id?: string;
   team_a_id?: string;
