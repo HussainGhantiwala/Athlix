@@ -209,12 +209,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const resolveSession = async (
       nextSession: Session | null,
       source: string,
-      options?: { forceRefresh?: boolean; keepUiStable?: boolean }
+      options?: { forceRefresh?: boolean }
     ) => {
       const requestId = ++authRequestIdRef.current;
       const resolvedUser = nextSession?.user ?? null;
       const forceRefresh = options?.forceRefresh ?? false;
-      const keepUiStable = options?.keepUiStable ?? false;
 
       if (!isMounted) {
         return;
@@ -235,11 +234,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setIsSessionReady(true);
-
-      if (!keepUiStable) {
-        setIsProfileLoaded(false);
-        setIsReady(false);
-      }
+      setIsProfileLoaded(false);
+      setIsReady(false);
 
       try {
         const snapshot = await fetchUserData(resolvedUser.id, resolvedUser.email, forceRefresh);
@@ -253,9 +249,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!isMounted || requestId !== authRequestIdRef.current) {
           return;
         }
-        if (!keepUiStable) {
-          resetState();
-        }
+        resetState();
       } finally {
         if (isMounted && requestId === authRequestIdRef.current) {
           setIsProfileLoaded(true);
@@ -275,16 +269,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (event === 'TOKEN_REFRESHED') {
-        await resolveSession(newSession, `auth:${event}`, {
-          forceRefresh: true,
-          keepUiStable: true,
-        });
-        return;
+      if (newSession?.user) {
+        setIsReady(false);
+        setIsProfileLoaded(false);
       }
 
       await resolveSession(newSession, `auth:${event}`, {
-        forceRefresh: event === 'SIGNED_IN' || event === 'USER_UPDATED',
+        forceRefresh: event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED',
       });
     });
 
@@ -393,7 +384,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isSuperAdmin = role === 'super_admin';
   const universityId = profile?.university_id ?? university?.id ?? null;
-  const needsUniversitySetup = !!user && !isSuperAdmin && !universityId && pendingInvites.length === 0;
+  const needsUniversitySetup =
+    !!user &&
+    isProfileLoaded &&
+    !isSuperAdmin &&
+    !profile?.university_id &&
+    pendingInvites.length === 0;
   const loading = !isReady;
 
   useEffect(() => {

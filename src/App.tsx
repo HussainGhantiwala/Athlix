@@ -12,6 +12,7 @@ import React, { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 
 // Public pages (keep eager — entry points)
+import HomePage from "./pages/HomePage";
 import PublicScoreboard from "./pages/PublicScoreboard";
 import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
@@ -24,7 +25,6 @@ import CoordinatorDashboard from "./pages/coordinator/CoordinatorDashboard";
 import StudentDashboard from "./pages/student/StudentDashboard";
 
 // Core workflow (keep eager — frequently used)
-import Dashboard from "./pages/Dashboard";
 import ScoreControlPanel from "./components/coordinator/ScoreControlPanel";
 
 // Lazy-loaded pages
@@ -81,7 +81,8 @@ const App = () => (
         <AuthProvider>
           <Routes>
             {/* Public Routes */}
-            <Route path="/" element={<PublicScoreboard />} />
+            <Route path="/" element={<HomePage />} />
+            <Route path="/scores" element={<PublicScoreboard />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/register-university" element={<RegisterUniversity />} />
             <Route path="/unauthorized" element={<Unauthorized />} />

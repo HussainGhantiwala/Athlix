@@ -1,7 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2 } from 'lucide-react';
 import { getTargetPath } from '@/lib/auth-routing';
+import { LoadingScreen } from '@/components/auth/LoadingScreen';
 
 interface RoleRedirectProps {
   target?: string;
@@ -14,14 +14,7 @@ export function RoleRedirect({ target }: RoleRedirectProps) {
   const { role, universityId, isSuperAdmin, isReady } = useAuth();
 
   if (!isReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-accent mx-auto mb-4" />
-          <p className="text-muted-foreground">Redirecting...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Redirecting..." />;
   }
 
   if (isSuperAdmin || role === 'super_admin') {
