@@ -88,21 +88,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const fetchUserData = async (userId: string, userEmail?: string | null, forceRefresh = false): Promise<UserContextSnapshot> => {
-    if (!forceRefresh) {
-      const cached = userContextCacheRef.current.get(userId);
-      if (cached) {
-        return cached;
+    setProfileLoading(true);
+
+    try {
+      if (!forceRefresh) {
+        const cached = userContextCacheRef.current.get(userId);
+        if (cached) {
+          return cached;
+        }
+
+        const pending = pendingContextRequestsRef.current.get(userId);
+        if (pending) {
+          return pending;
+        }
       }
 
-      const pending = pendingContextRequestsRef.current.get(userId);
-      if (pending) {
-        return pending;
-      }
-    }
+      const normalizedEmail = userEmail?.trim().toLowerCase() || null;
 
-    const normalizedEmail = userEmail?.trim().toLowerCase() || null;
-
-    const request = measureWithTimeout(`auth context ${userId}`, async () => {
+      const request = measureWithTimeout(`auth context ${userId}`, async () => {
       const { data: syncData, error: syncError } = await supabase.rpc('sync_user_membership' as any);
       if (syncError) {
         throw syncError;
@@ -192,16 +195,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: resolvedRole,
         pendingInvites: inviteData,
       };
-    }, REQUEST_TIMEOUT_MS);
+      }, REQUEST_TIMEOUT_MS);
 
-    pendingContextRequestsRef.current.set(userId, request);
+      pendingContextRequestsRef.current.set(userId, request);
 
-    try {
-      const snapshot = await request;
-      userContextCacheRef.current.set(userId, snapshot);
-      return snapshot;
+      try {
+        const snapshot = await request;
+        userContextCacheRef.current.set(userId, snapshot);
+        return snapshot;
+      } finally {
+        pendingContextRequestsRef.current.delete(userId);
+      }
     } finally {
-      pendingContextRequestsRef.current.delete(userId);
+      setProfileLoading(false);
+      setIsProfileLoaded(true);
     }
   };
 
@@ -274,6 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (newSession?.user) {
         setIsReady(false);
+        setProfileLoading(true);
         setIsProfileLoaded(false);
       }
 
@@ -288,6 +296,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch((error) => {
         console.error('Error loading session:', error);
         if (isMounted) {
+          setProfileLoading(false);
           setIsSessionReady(true);
           setIsProfileLoaded(true);
           setIsReady(true);
@@ -304,6 +313,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUserContext = async () => {
     if (!user?.id) return;
 
+    setProfileLoading(true);
     setIsProfileLoaded(false);
     setIsReady(false);
 
@@ -313,6 +323,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const snapshot = await fetchUserData(user.id, user.email, true);
       applyUserContext(snapshot);
     } finally {
+      setProfileLoading(false);
       setIsProfileLoaded(true);
       setIsReady(true);
     }
@@ -344,6 +355,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSession(null);
     resetState();
+    setProfileLoading(false);
     setIsSessionReady(true);
     setIsProfileLoaded(true);
     setIsReady(true);
@@ -442,6 +454,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isProfileLoaded,
     isSuperAdmin,
     needsUniversitySetup,
+    profileLoading,
   ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
