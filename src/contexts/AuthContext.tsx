@@ -19,6 +19,7 @@ interface AuthContextType {
   isReady: boolean;
   isSessionReady: boolean;
   isProfileLoaded: boolean;
+  profileLoading: boolean;
   isSuperAdmin: boolean;
   needsUniversitySetup: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const userContextCacheRef = useRef(new Map<string, UserContextSnapshot>());
   const pendingContextRequestsRef = useRef(new Map<string, Promise<UserContextSnapshot>>());
   const authRequestIdRef = useRef(0);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const resetState = () => {
     setProfile(null);
@@ -176,7 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const profileData = resolvedProfile;
       const roleData = (rolesResult.data as UserRole[] | null) ?? [];
-      const inviteData = (invitesResult.data as Invite[] | null) ?? [];
+      const inviteData = (invitesResult.data as unknown as Invite[] | null) ?? [];
       const resolvedUniversity = (profileResult.data as University | null) ?? null;
       const resolvedUniversityId = profileData?.university_id ?? resolvedUniversity?.id ?? null;
       const resolvedRole =
@@ -236,7 +238,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsSessionReady(true);
       setIsProfileLoaded(false);
       setIsReady(false);
-
+      setProfileLoading(true);
       try {
         const snapshot = await fetchUserData(resolvedUser.id, resolvedUser.email, forceRefresh);
         if (!isMounted || requestId !== authRequestIdRef.current) {
@@ -254,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (isMounted && requestId === authRequestIdRef.current) {
           setIsProfileLoaded(true);
           setIsReady(true);
+          setProfileLoading(false);
         }
       }
     };
@@ -377,8 +380,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasRole = (requiredRole: AppRole): boolean => {
     if (!role) return false;
+  
+    // Super admin can access everything
     if (role === 'super_admin') return true;
-    if (requiredRole === 'super_admin') return role === 'super_admin';
+  
+    // Only allow super_admin check explicitly
+    if (requiredRole === 'super_admin') return false;
+  
     return roleHierarchy[role] >= roleHierarchy[requiredRole];
   };
 
@@ -405,6 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isReady,
     isSessionReady,
     isProfileLoaded,
+    profileLoading,
     isSuperAdmin,
     needsUniversitySetup,
     signIn,
