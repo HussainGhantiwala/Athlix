@@ -18,35 +18,42 @@ export function AuthPage() {
     signIn,
     signUp,
     user,
-    profile,
     role,
     isSuperAdmin,
     universityId,
     isReady,
     isProfileLoaded,
+    needsUniversitySetup,
   } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect logged-in users to their role-specific dashboard
   useEffect(() => {
-    if (!isReady || !user) {
-      return;
-    }
+    if (!isReady || !isProfileLoaded) return;
+    if (!user) return;
 
     if (isSuperAdmin || role === 'super_admin') {
       navigate('/super-admin', { replace: true });
       return;
     }
 
-    if (universityId) {
-      navigate(getRoleHomePath(role || 'student', false), { replace: true });
+    if (needsUniversitySetup) {
+      navigate('/register-university', { replace: true });
       return;
     }
 
-    if (user && isProfileLoaded && profile && !profile.university_id) {
-      navigate('/register-university', { replace: true });
+    if (universityId) {
+      navigate(getRoleHomePath(role || 'student', false), { replace: true });
     }
-  }, [user, profile, role, navigate, isSuperAdmin, universityId, isReady, isProfileLoaded]);
+  }, [
+    user,
+    role,
+    navigate,
+    isSuperAdmin,
+    universityId,
+    isReady,
+    isProfileLoaded,
+    needsUniversitySetup
+  ]);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
