@@ -43,7 +43,7 @@ export function AuthPage() {
       return;
     }
 
-    if (isProfileLoaded && profile && !profile.university_id) {
+    if (user && isProfileLoaded && profile && !profile.university_id) {
       navigate('/register-university', { replace: true });
     }
   }, [user, profile, role, navigate, isSuperAdmin, universityId, isReady, isProfileLoaded]);
