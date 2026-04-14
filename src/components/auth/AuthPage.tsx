@@ -18,6 +18,7 @@ export function AuthPage() {
     signIn,
     signUp,
     user,
+    profile,
     role,
     isSuperAdmin,
     universityId,
@@ -41,8 +42,10 @@ export function AuthPage() {
       return;
     }
 
-    navigate('/register-university', { replace: true });
-  }, [user, role, navigate, isSuperAdmin, universityId, isReady]);
+    if (profile && !profile.university_id) {
+      navigate('/register-university', { replace: true });
+    }
+  }, [user, profile, role, navigate, isSuperAdmin, universityId, isReady]);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');

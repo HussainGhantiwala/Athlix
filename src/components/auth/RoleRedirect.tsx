@@ -11,7 +11,7 @@ interface RoleRedirectProps {
  * Redirects users to their role-specific dashboard or module page
  */
 export function RoleRedirect({ target }: RoleRedirectProps) {
-  const { role, universityId, isSuperAdmin, isReady } = useAuth();
+  const { role, profile, universityId, isSuperAdmin, isReady } = useAuth();
 
   if (!isReady) {
     return <LoadingScreen message="Redirecting..." />;
@@ -25,8 +25,12 @@ export function RoleRedirect({ target }: RoleRedirectProps) {
     return <Navigate to={getTargetPath(role || 'student', target, false)} replace />;
   }
 
-  if (!universityId) {
+  if (profile && !profile.university_id) {
     return <Navigate to="/register-university" replace />;
+  }
+
+  if (!universityId) {
+    return <Navigate to="/auth" replace />;
   }
 
   return <Navigate to={getTargetPath(role || 'student', target, false)} replace />;
