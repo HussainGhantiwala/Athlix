@@ -23,6 +23,7 @@ export function AuthPage() {
     isSuperAdmin,
     universityId,
     isReady,
+    isProfileLoaded,
   } = useAuth();
   const navigate = useNavigate();
 
@@ -42,10 +43,10 @@ export function AuthPage() {
       return;
     }
 
-    if (profile && !profile.university_id) {
+    if (isProfileLoaded && profile && !profile.university_id) {
       navigate('/register-university', { replace: true });
     }
-  }, [user, profile, role, navigate, isSuperAdmin, universityId, isReady]);
+  }, [user, profile, role, navigate, isSuperAdmin, universityId, isReady, isProfileLoaded]);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
