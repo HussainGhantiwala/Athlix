@@ -387,22 +387,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const needsUniversitySetup =
     !!user &&
     isProfileLoaded &&
+    !!profile &&
     !isSuperAdmin &&
     !profile?.university_id &&
     pendingInvites.length === 0;
   const loading = !isReady;
-
-  useEffect(() => {
-    console.log({
-      isReady,
-      user_id: user?.id ?? null,
-      university_id: profile?.university_id ?? null,
-      role,
-      loading,
-      isSessionReady,
-      isProfileLoaded,
-    });
-  }, [isProfileLoaded, isReady, isSessionReady, loading, profile?.university_id, role, user?.id]);
 
   const value = useMemo(() => ({
     user,
