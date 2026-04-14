@@ -8,6 +8,7 @@ export function RoleRedirect({ target }: { target?: string }) {
     user,
     role,
     profile,
+    universityId,
     isSuperAdmin,
     isReady,
     profileLoading,
@@ -15,7 +16,7 @@ export function RoleRedirect({ target }: { target?: string }) {
   } = useAuth();
 
   if (!isReady || profileLoading || !isProfileLoaded) {
-    return <LoadingScreen message="Loading your dashboard..." />;
+    return <LoadingScreen message="Loading..." />;
   }
 
   if (!user) {
@@ -26,7 +27,7 @@ export function RoleRedirect({ target }: { target?: string }) {
     return <Navigate to={getTargetPath('super_admin', target, true)} replace />;
   }
 
-  if (profile && !profile.university_id) {
+  if (user && profile && !profile.university_id && !universityId) {
     return <Navigate to="/register-university" replace />;
   }
 
