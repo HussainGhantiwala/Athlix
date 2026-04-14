@@ -271,38 +271,8 @@ export function AuthPage() {
           </Link>
         </p>
 
-        {/* Dev Seeder */}
-        <div className="mt-6 p-4 rounded-lg border border-primary-foreground/10 bg-primary-foreground/5">
-          <p className="text-xs text-primary-foreground/50 mb-3 text-center font-medium">DEV MODE — Seed Test Users</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full mb-3 border-primary-foreground/20 text-primary-foreground/70 hover:text-primary-foreground"
-            onClick={async () => {
-              toast.info('Seeding dev users...');
-              try {
-                const { data, error } = await supabase.functions.invoke('seed-dev-users');
-                if (error) throw error;
-                toast.success('Dev users seeded successfully!');
-                console.log('Seed results:', data);
-              } catch (err: any) {
-                toast.error(err.message || 'Failed to seed users');
-              }
-            }}
-          >
-            <Database className="h-4 w-4 mr-2" />
-            Seed Dev Users
-          </Button>
-          <div className="grid grid-cols-2 gap-2 text-xs text-primary-foreground/50">
-            <div><strong>Super:</strong> superadmin@athletix.dev</div>
-            <div><strong>Admin:</strong> admin@athletix.dev</div>
-            <div><strong>Faculty:</strong> faculty@athletix.dev</div>
-            <div><strong>Coordinator:</strong> coordinator@athletix.dev</div>
-            <div><strong>Student:</strong> student@athletix.dev</div>
-          </div>
-          <p className="text-xs text-primary-foreground/40 mt-2 text-center">Password: SuperAdmin@123 or [Role]@123</p>
-        </div>
-      </div>
-    </div>
+     </div>
+     </div>
+ 
   );
 }
