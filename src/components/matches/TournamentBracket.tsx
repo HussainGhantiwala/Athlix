@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Match, MatchStatusEnum } from '@/types/database';
+import { Match } from '@/types/database';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getTeamScores } from '@/lib/match-scoring';
@@ -10,6 +10,8 @@ interface TournamentBracketProps {
   eventSportId: string;
   highlightMatchId?: string;
 }
+
+const COMPLETED_BRACKET_STATUSES = new Set(['completed', 'completed_provisional', 'finalized']);
 
 const getRoundLabel = (round: string): string => {
   if (round === 'round_of_16') return 'Round of 16';
@@ -135,7 +137,7 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
                       <span>{teamBScore}</span>
                     </div>
 
-                    {match.status === MatchStatusEnum.Completed && (
+                    {COMPLETED_BRACKET_STATUSES.has(match.status) && (
                       <div className="text-xs text-muted-foreground pt-1 border-t border-border">
                         Winner: {winnerA ? match.team_a?.name : winnerB ? match.team_b?.name : 'Draw'}
                       </div>
