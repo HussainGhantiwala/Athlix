@@ -126,7 +126,35 @@ export default function PublicScoreboard() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `university_id=eq.${selectedUniversity}` },
-        () => void fetchMatches(selectedUniversity)
+        (payload) => {
+          console.log('Realtime update:', payload);
+
+          const newRow = payload.new as Match | Record<string, never>;
+          const oldRow = payload.old as Match | Record<string, never>;
+          const nextMatch = (newRow && 'id' in newRow ? newRow : null) as Match | null;
+          const prevMatch = (oldRow && 'id' in oldRow ? oldRow : null) as Match | null;
+
+          if (payload.eventType === 'DELETE' && prevMatch?.id) {
+            setLiveMatches((current) => current.filter((match) => match.id !== prevMatch.id));
+            setCompletedMatches((current) => current.filter((match) => match.id !== prevMatch.id));
+            return;
+          }
+
+          if (nextMatch?.id) {
+            setLiveMatches((current) => {
+              const withoutCurrent = current.filter((match) => match.id !== nextMatch.id);
+              return nextMatch.status === 'live' ? [nextMatch, ...withoutCurrent].slice(0, 10) : withoutCurrent;
+            });
+
+            setCompletedMatches((current) => {
+              const withoutCurrent = current.filter((match) => match.id !== nextMatch.id);
+              return nextMatch.status === 'completed' ? [nextMatch, ...withoutCurrent].slice(0, 10) : withoutCurrent;
+            });
+          }
+
+          // Keep list consistent for status transitions and joined relational fields.
+          void fetchMatches(selectedUniversity);
+        }
       )
       .subscribe();
 
