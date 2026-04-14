@@ -215,7 +215,7 @@ export default function HomePage() {
             Events, teams, live scoring, and analytics - all in one platform
           </p>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-            <Link to="/register-university">
+            <Link to="/auth">
               <Button size="lg" className="bg-gradient-to-r from-blue-500 to-emerald-400 px-8 text-white hover:opacity-95">
                 Get Started
                 <ChevronRight className="ml-2 h-4 w-4" />
