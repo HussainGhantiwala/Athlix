@@ -1,12 +1,14 @@
-﻿import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
+import { Clock, Edit2, Search, Target } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { StatusBadge } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Match } from '@/types/database';
+import { Skeleton } from '@/components/ui/skeleton';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Select,
   SelectContent,
@@ -14,58 +16,120 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { toast } from 'sonner';
-import { Search, Target, Edit2, Clock } from 'lucide-react';
-import { format } from 'date-fns';
-import { Skeleton } from '@/components/ui/skeleton';
+import { supabase } from '@/integrations/supabase/client';
+import { getTenantScope } from '@/lib/tenant-scope';
+import { measureWithTimeout, REQUEST_TIMEOUT_MS } from '@/lib/performance';
 import { cn } from '@/lib/utils';
+import { Match } from '@/types/database';
+
+const PAGE_SIZE = 50;
 
 export default function Matches() {
   const navigate = useNavigate();
-  const { isStudentCoordinator } = useAuth();
+  const { isStudentCoordinator, isSuperAdmin, universityId } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [matches, setMatches] = useState<Match[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  const fetchMatches = useCallback(async (pageIndex: number, replace = false) => {
+    if (!isSuperAdmin && !universityId) {
+      setMatches([]);
+      setHasMore(false);
+      setLoading(false);
+      return;
+    }
+
+    if (pageIndex === 0) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+
+    try {
+      let scopedEventSportIds: string[] | null = null;
+
+      if (!isSuperAdmin && universityId) {
+        const scope = await getTenantScope(universityId);
+        scopedEventSportIds = scope.eventSportIds;
+      }
+
+      if (scopedEventSportIds && scopedEventSportIds.length === 0) {
+        setMatches([]);
+        setHasMore(false);
+        return;
+      }
+
+      let query = supabase
+        .from('matches')
+        .select(`
+          id,
+          status,
+          scheduled_at,
+          started_at,
+          completed_at,
+          team_a_id,
+          team_b_id,
+          score_a,
+          score_b,
+          runs_a,
+          runs_b,
+          winner_team_id,
+          event_sport_id,
+          venue:venues(name),
+          team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
+          team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
+          event_sport:event_sports(
+            sport_category:sports_categories(name, icon),
+            event:events(name)
+          )
+        `, { count: 'exact' })
+        .order('scheduled_at', { ascending: false })
+        .range(pageIndex * PAGE_SIZE, pageIndex * PAGE_SIZE + PAGE_SIZE - 1);
+
+      if (statusFilter !== 'all') {
+        query = query.eq('status', statusFilter as any);
+      }
+
+      if (scopedEventSportIds) {
+        query = query.in('event_sport_id', scopedEventSportIds);
+      }
+
+      const { data, error, count } = await measureWithTimeout(
+        `matches page ${pageIndex + 1}`,
+        async () => query,
+        REQUEST_TIMEOUT_MS
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const nextMatches = (data as unknown as Match[]) || [];
+      setMatches((current) => (replace ? nextMatches : [...current, ...nextMatches]));
+      setHasMore((count || 0) > (pageIndex + 1) * PAGE_SIZE);
+      setPage(pageIndex);
+    } catch (fetchError: any) {
+      console.error('Failed to fetch matches:', fetchError);
+      toast.error(fetchError.message || 'Failed to fetch matches');
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [isSuperAdmin, statusFilter, universityId]);
 
   useEffect(() => {
-    fetchMatches();
-  }, [statusFilter]);
+    void fetchMatches(0, true);
+  }, [fetchMatches]);
 
-  const fetchMatches = async () => {
-    setLoading(true);
-    let query = supabase
-      .from('matches')
-      .select(`
-        *,
-        team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
-        team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
-        venue:venues(name),
-        event_sport:event_sports(
-          sport_category:sports_categories(name, icon),
-          event:events(name)
-        )
-      `)
-      .order('scheduled_at', { ascending: false });
-
-    if (statusFilter !== 'all') {
-      query = query.eq('status', statusFilter as any);
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      toast.error('Failed to fetch matches');
-    } else {
-      setMatches((data as unknown as Match[]) || []);
-    }
-    setLoading(false);
-  };
-
-  const filteredMatches = matches.filter((match) =>
+  const filteredMatches = useMemo(() => matches.filter((match) =>
     match.team_a?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     match.team_b?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     match.event_sport?.sport_category?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ), [matches, searchQuery]);
 
   return (
     <DashboardLayout>
@@ -81,7 +145,7 @@ export default function Matches() {
             <Input
               placeholder="Search matches..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-10"
             />
           </div>
@@ -100,8 +164,8 @@ export default function Matches() {
 
         {loading ? (
           <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <Skeleton key={i} className="h-24 rounded-xl" />
+            {[...Array(5)].map((_, index) => (
+              <Skeleton key={index} className="h-24 rounded-xl" />
             ))}
           </div>
         ) : filteredMatches.length > 0 ? (
@@ -109,11 +173,12 @@ export default function Matches() {
             {filteredMatches.map((match) => {
               const scoreA = match.score_a ?? match.runs_a ?? 0;
               const scoreB = match.score_b ?? match.runs_b ?? 0;
-              const winnerName = match.winner_team_id === match.team_a_id
-                ? match.team_a?.name
-                : match.winner_team_id === match.team_b_id
-                ? match.team_b?.name
-                : null;
+              const winnerName =
+                match.winner_team_id === match.team_a_id
+                  ? match.team_a?.name
+                  : match.winner_team_id === match.team_b_id
+                    ? match.team_b?.name
+                    : null;
 
               return (
                 <div
@@ -188,6 +253,14 @@ export default function Matches() {
                 </div>
               );
             })}
+
+            {hasMore && (
+              <div className="flex justify-center pt-2">
+                <Button variant="outline" onClick={() => void fetchMatches(page + 1)} disabled={loadingMore}>
+                  {loadingMore ? 'Loading more...' : 'Load More Matches'}
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="dashboard-card p-12 text-center">

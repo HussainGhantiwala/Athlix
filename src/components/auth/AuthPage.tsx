@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { getRoleHomePath } from '@/lib/auth-routing';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,31 +10,39 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Trophy, Mail, Lock, User, ArrowRight, Loader2, Database } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signUp, user, role, loading } = useAuth();
+  const {
+    signIn,
+    signUp,
+    user,
+    role,
+    isSuperAdmin,
+    universityId,
+    isReady,
+  } = useAuth();
   const navigate = useNavigate();
 
   // Redirect logged-in users to their role-specific dashboard
   useEffect(() => {
-    if (!loading && user) {
-      const getDashboardPath = () => {
-        switch (role) {
-          case 'admin':
-            return '/admin';
-          case 'faculty':
-            return '/faculty';
-          case 'student_coordinator':
-            return '/coordinator';
-          case 'student':
-          default:
-            return '/student';
-        }
-      };
-      navigate(getDashboardPath(), { replace: true });
+    if (!isReady || !user) {
+      return;
     }
-  }, [user, role, loading, navigate]);
+
+    if (isSuperAdmin || role === 'super_admin') {
+      navigate('/super-admin', { replace: true });
+      return;
+    }
+
+    if (universityId) {
+      navigate(getRoleHomePath(role || 'student', false), { replace: true });
+      return;
+    }
+
+    navigate('/register-university', { replace: true });
+  }, [user, role, navigate, isSuperAdmin, universityId, isReady]);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
@@ -87,7 +96,7 @@ export function AuthPage() {
   };
 
   // Show loading while checking auth state
-  if (loading) {
+  if (!isReady) {
     return (
       <div className="min-h-screen hero-gradient flex items-center justify-center p-4">
         <div className="text-center">
@@ -243,6 +252,14 @@ export function AuthPage() {
           By signing up, you agree to our Terms of Service and Privacy Policy
         </p>
 
+        <p className="text-center text-sm text-primary-foreground/70 mt-4">
+          New university?
+          {' '}
+          <Link to="/register-university" className="underline underline-offset-4">
+            Create a university workspace
+          </Link>
+        </p>
+
         {/* Dev Seeder */}
         <div className="mt-6 p-4 rounded-lg border border-primary-foreground/10 bg-primary-foreground/5">
           <p className="text-xs text-primary-foreground/50 mb-3 text-center font-medium">DEV MODE — Seed Test Users</p>
@@ -266,12 +283,13 @@ export function AuthPage() {
             Seed Dev Users
           </Button>
           <div className="grid grid-cols-2 gap-2 text-xs text-primary-foreground/50">
+            <div><strong>Super:</strong> superadmin@athletix.dev</div>
             <div><strong>Admin:</strong> admin@athletix.dev</div>
             <div><strong>Faculty:</strong> faculty@athletix.dev</div>
             <div><strong>Coordinator:</strong> coordinator@athletix.dev</div>
             <div><strong>Student:</strong> student@athletix.dev</div>
           </div>
-          <p className="text-xs text-primary-foreground/40 mt-2 text-center">Password: [Role]@123 (e.g. Admin@123)</p>
+          <p className="text-xs text-primary-foreground/40 mt-2 text-center">Password: SuperAdmin@123 or [Role]@123</p>
         </div>
       </div>
     </div>

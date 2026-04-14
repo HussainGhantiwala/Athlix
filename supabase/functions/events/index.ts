@@ -76,14 +76,27 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
-    const { data: adminRole } = await supabaseAdmin
-      .from("user_roles")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
+    const { data: eventRow, error: eventError } = await supabaseAdmin
+      .from("events")
+      .select("university_id")
+      .eq("id", route.eventId)
       .maybeSingle();
 
-    if (!adminRole) {
+    if (eventError || !eventRow?.university_id) {
+      return jsonResponse({ error: "Event not found" }, 404);
+    }
+
+    const { data: roles } = await supabaseAdmin
+      .from("user_roles")
+      .select("role, university_id")
+      .eq("user_id", user.id);
+
+    const canManageEvent = (roles ?? []).some((entry) => {
+      if (entry.role === "super_admin") return true;
+      return entry.role === "admin" && entry.university_id === eventRow.university_id;
+    });
+
+    if (!canManageEvent) {
       return jsonResponse({ error: "Forbidden" }, 403);
     }
 

@@ -5,15 +5,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AuthPage } from "@/components/auth/AuthPage";
+import { PendingInvitesDialog } from "@/components/auth/PendingInvitesDialog";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { RoleRedirect } from "@/components/auth/RoleRedirect";
 import React, { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 
 // Public pages (keep eager — entry points)
+import HomePage from "./pages/HomePage";
 import PublicScoreboard from "./pages/PublicScoreboard";
 import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
+import RegisterUniversity from "./pages/RegisterUniversity";
 
 // Role-specific dashboards (keep eager — first screen after login)
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -22,7 +25,6 @@ import CoordinatorDashboard from "./pages/coordinator/CoordinatorDashboard";
 import StudentDashboard from "./pages/student/StudentDashboard";
 
 // Core workflow (keep eager — frequently used)
-import Dashboard from "./pages/Dashboard";
 import ScoreControlPanel from "./components/coordinator/ScoreControlPanel";
 
 // Lazy-loaded pages
@@ -31,6 +33,7 @@ const Matches = React.lazy(() => import("./pages/Matches"));
 const Teams = React.lazy(() => import("./pages/Teams"));
 const Universities = React.lazy(() => import("./pages/Universities"));
 const Registrations = React.lazy(() => import("./pages/Registrations"));
+const AdminCoordinators = React.lazy(() => import("./pages/admin/AdminCoordinators"));
 const Budgets = React.lazy(() => import("./pages/Budgets"));
 const Analytics = React.lazy(() => import("./pages/Analytics"));
 const Bracket = React.lazy(() => import("./pages/Bracket"));
@@ -78,8 +81,10 @@ const App = () => (
         <AuthProvider>
           <Routes>
             {/* Public Routes */}
-            <Route path="/" element={<PublicScoreboard />} />
+            <Route path="/" element={<HomePage />} />
+            <Route path="/scores" element={<PublicScoreboard />} />
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/register-university" element={<RegisterUniversity />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
 
             {/* Role-based redirect from /dashboard */}
@@ -93,8 +98,9 @@ const App = () => (
             />
 
             {/* ==================== ADMIN ROUTES ==================== */}
+            <Route path="/super-admin" element={<ProtectedRoute requiredRole="super_admin"><AdminDashboard /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminDashboard /></ProtectedRoute>} />
-            <Route path="/admin/universities" element={<ProtectedRoute requiredRole="admin"><Lazy><Universities /></Lazy></ProtectedRoute>} />
+            <Route path="/admin/universities" element={<ProtectedRoute requiredRole="super_admin"><Lazy><Universities /></Lazy></ProtectedRoute>} />
             <Route path="/admin/events" element={<ProtectedRoute requiredRole="admin"><Lazy><Events /></Lazy></ProtectedRoute>} />
             <Route path="/admin/events/*" element={<ProtectedRoute requiredRole="admin"><Lazy><Events /></Lazy></ProtectedRoute>} />
             <Route path="/admin/teams" element={<ProtectedRoute requiredRole="admin"><Lazy><Teams /></Lazy></ProtectedRoute>} />
@@ -103,9 +109,9 @@ const App = () => (
             <Route path="/admin/matches/*" element={<ProtectedRoute requiredRole="admin"><Lazy><Matches /></Lazy></ProtectedRoute>} />
             <Route path="/admin/budgets" element={<ProtectedRoute requiredRole="admin"><Lazy><Budgets /></Lazy></ProtectedRoute>} />
             <Route path="/admin/budgets/*" element={<ProtectedRoute requiredRole="admin"><Lazy><Budgets /></Lazy></ProtectedRoute>} />
-            <Route path="/admin/analytics" element={<ProtectedRoute requiredRole="admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
-            <Route path="/admin/coordinators" element={<ProtectedRoute requiredRole="admin"><Lazy><Registrations /></Lazy></ProtectedRoute>} />
-            <Route path="/admin/reports" element={<ProtectedRoute requiredRole="admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
+            <Route path="/admin/analytics" element={<ProtectedRoute requiredRole="super_admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
+            <Route path="/admin/coordinators" element={<ProtectedRoute requiredRole="admin"><Lazy><AdminCoordinators /></Lazy></ProtectedRoute>} />
+            <Route path="/admin/reports" element={<ProtectedRoute requiredRole="super_admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
             <Route path="/admin/registration-approval" element={<ProtectedRoute requiredRole="admin"><Lazy><RegistrationApproval /></Lazy></ProtectedRoute>} />
             <Route path="/admin/form-approval" element={<ProtectedRoute requiredRole="admin"><Lazy><AdminFormApproval /></Lazy></ProtectedRoute>} />
             <Route path="/admin/rule-book" element={<ProtectedRoute requiredRole="admin"><Lazy><RuleBookManager /></Lazy></ProtectedRoute>} />
@@ -160,12 +166,13 @@ const App = () => (
             <Route path="/teams" element={<ProtectedRoute><RoleRedirect target="teams" /></ProtectedRoute>} />
             <Route path="/registrations" element={<ProtectedRoute requiredRole="student_coordinator"><RoleRedirect target="registrations" /></ProtectedRoute>} />
             <Route path="/budgets" element={<ProtectedRoute requiredRole="faculty"><RoleRedirect target="budgets" /></ProtectedRoute>} />
-            <Route path="/universities" element={<ProtectedRoute requiredRole="admin"><Navigate to="/admin/universities" replace /></ProtectedRoute>} />
-            <Route path="/analytics" element={<ProtectedRoute requiredRole="admin"><Navigate to="/admin/analytics" replace /></ProtectedRoute>} />
+            <Route path="/universities" element={<ProtectedRoute requiredRole="super_admin"><Navigate to="/admin/universities" replace /></ProtectedRoute>} />
+            <Route path="/analytics" element={<ProtectedRoute requiredRole="super_admin"><Navigate to="/admin/analytics" replace /></ProtectedRoute>} />
 
             {/* Catch-all */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          <PendingInvitesDialog />
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

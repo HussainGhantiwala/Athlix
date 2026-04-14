@@ -20,7 +20,7 @@ import { Plus, Search, Building2, MapPin, Edit, ToggleLeft, ToggleRight } from '
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Universities() {
-  const { user, isAdmin } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [universities, setUniversities] = useState<University[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,6 +30,7 @@ export default function Universities() {
 
   const [formData, setFormData] = useState({
     name: '',
+    domain: '',
     short_name: '',
     address: '',
     city: '',
@@ -57,7 +58,7 @@ export default function Universities() {
   };
 
   const handleCreate = async () => {
-    if (!formData.name || !formData.short_name) {
+    if (!formData.name || !formData.domain || !formData.short_name) {
       toast.error('Please fill in required fields');
       return;
     }
@@ -114,6 +115,7 @@ export default function Universities() {
   const resetForm = () => {
     setFormData({
       name: '',
+      domain: '',
       short_name: '',
       address: '',
       city: '',
@@ -125,6 +127,7 @@ export default function Universities() {
   const openEdit = (university: University) => {
     setFormData({
       name: university.name,
+      domain: university.domain || '',
       short_name: university.short_name,
       address: university.address || '',
       city: university.city || '',
@@ -136,11 +139,12 @@ export default function Universities() {
 
   const filteredUniversities = universities.filter((uni) =>
     uni.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    uni.domain?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     uni.short_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     uni.city?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  if (!isAdmin) {
+  if (!isSuperAdmin) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-[60vh]">
@@ -186,6 +190,15 @@ export default function Universities() {
                     placeholder="University of Example"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="domain">Domain *</Label>
+                  <Input
+                    id="domain"
+                    placeholder="pcu.edu.in"
+                    value={formData.domain}
+                    onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
@@ -271,7 +284,7 @@ export default function Universities() {
                     </div>
                     <div>
                       <h3 className="font-semibold">{university.name}</h3>
-                      <p className="text-sm text-muted-foreground">{university.short_name}</p>
+                      <p className="text-sm text-muted-foreground">{university.short_name} • {university.domain || 'No domain'}</p>
                     </div>
                   </div>
                   <span
@@ -347,6 +360,13 @@ export default function Universities() {
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Domain</Label>
+              <Input
+                value={formData.domain}
+                onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
               />
             </div>
             <div className="space-y-2">

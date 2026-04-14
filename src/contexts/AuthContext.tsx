@@ -1,17 +1,32 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { AppRole, Profile } from '@/types/database';
+import { AppRole, Invite, Profile, University, UserRole } from '@/types/database';
+import { roleHierarchy } from '@/lib/auth-routing';
+import { clearTenantScope } from '@/lib/tenant-scope';
+import { measureWithTimeout, REQUEST_TIMEOUT_MS } from '@/lib/performance';
 
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: Profile | null;
+  university: University | null;
+  universityId: string | null;
   role: AppRole | null;
+  pendingInvites: Invite[];
   loading: boolean;
+  /** True once initial session resolution finished (and profile loaded when logged in). Stays true during silent token refresh. */
+  isReady: boolean;
+  isSessionReady: boolean;
+  isProfileLoaded: boolean;
+  isSuperAdmin: boolean;
+  needsUniversitySetup: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  acceptInvite: (inviteId: string) => Promise<{ error: Error | null }>;
+  rejectInvite: (inviteId: string) => Promise<{ error: Error | null }>;
+  refreshUserContext: () => Promise<void>;
   hasRole: (requiredRole: AppRole) => boolean;
   isAdmin: boolean;
   isFaculty: boolean;
@@ -21,87 +36,284 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const roleHierarchy: Record<AppRole, number> = {
-  admin: 4,
-  faculty: 3,
-  student_coordinator: 2,
-  student: 1,
+type UserContextSnapshot = {
+  profile: Profile | null;
+  university: University | null;
+  role: AppRole | null;
+  pendingInvites: Invite[];
 };
+
+function resolveHighestRole(roles: UserRole[], universityId: string | null): AppRole | null {
+  const scopedRoles = roles.filter((entry) => entry.role === 'super_admin' || entry.university_id === universityId);
+
+  if (!scopedRoles.length) {
+    return null;
+  }
+
+  const highest = scopedRoles.reduce((prev, current) =>
+    roleHierarchy[current.role] > roleHierarchy[prev.role] ? current : prev
+  );
+
+  return highest.role;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [university, setUniversity] = useState<University | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [pendingInvites, setPendingInvites] = useState<Invite[]>([]);
+  const [isSessionReady, setIsSessionReady] = useState(false);
+  const [isProfileLoaded, setIsProfileLoaded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const userContextCacheRef = useRef(new Map<string, UserContextSnapshot>());
+  const pendingContextRequestsRef = useRef(new Map<string, Promise<UserContextSnapshot>>());
+  const authRequestIdRef = useRef(0);
 
-  const fetchUserData = async (userId: string) => {
-    try {
-      // Fetch profile
-      const { data: profileData } = await supabase
+  const resetState = () => {
+    setProfile(null);
+    setUniversity(null);
+    setRole(null);
+    setPendingInvites([]);
+  };
+
+  const applyUserContext = (snapshot: UserContextSnapshot) => {
+    setProfile(snapshot.profile);
+    setUniversity(snapshot.university);
+    setRole(snapshot.role);
+    setPendingInvites(snapshot.pendingInvites);
+  };
+
+  const fetchUserData = async (userId: string, userEmail?: string | null, forceRefresh = false): Promise<UserContextSnapshot> => {
+    if (!forceRefresh) {
+      const cached = userContextCacheRef.current.get(userId);
+      if (cached) {
+        return cached;
+      }
+
+      const pending = pendingContextRequestsRef.current.get(userId);
+      if (pending) {
+        return pending;
+      }
+    }
+
+    const normalizedEmail = userEmail?.trim().toLowerCase() || null;
+
+    const request = measureWithTimeout(`auth context ${userId}`, async () => {
+      const { data: syncData, error: syncError } = await supabase.rpc('sync_user_membership' as any);
+      if (syncError) {
+        throw syncError;
+      }
+
+      const { data: profileRow, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle();
+        .single();
 
-      if (profileData) {
-        setProfile(profileData as Profile);
+      if (profileError && profileError.code !== 'PGRST116') {
+        throw profileError;
       }
 
-      // Fetch highest role
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .order('role');
+      const resolvedProfile = (profileRow as Profile | null) ?? null;
 
-      if (roleData && roleData.length > 0) {
-        // Get highest role
-        const highestRole = roleData.reduce((prev, curr) => {
-          const prevLevel = roleHierarchy[prev.role as AppRole] || 0;
-          const currLevel = roleHierarchy[curr.role as AppRole] || 0;
-          return currLevel > prevLevel ? curr : prev;
-        });
-        setRole(highestRole.role as AppRole);
-      } else {
-        setRole('student');
+      const [profileResult, rolesResult, invitesResult] = await Promise.all([
+        resolvedProfile?.university_id
+          ? supabase
+              .from('universities')
+              .select('id, name, short_name, logo_url, domain, address, city, state, country, is_active, created_by, created_at, updated_at')
+              .eq('id', resolvedProfile.university_id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabase
+          .from('user_roles')
+          .select('id, user_id, university_id, role, created_at')
+          .eq('user_id', userId)
+          .limit(10),
+        supabase
+          .from('invites' as any)
+          .select(`
+            id,
+            email,
+            role,
+            university_id,
+            status,
+            created_at,
+            university:universities(
+              id,
+              name,
+              short_name,
+              logo_url,
+              domain,
+              address,
+              city,
+              state,
+              country,
+              is_active,
+              created_by,
+              created_at,
+              updated_at
+            )
+          `)
+          .eq('status', 'pending')
+          .ilike('email', normalizedEmail || '__none__')
+          .order('created_at', { ascending: false })
+          .limit(10),
+      ]);
+
+      if (profileResult.error) {
+        throw profileResult.error;
       }
-    } catch (error) {
-      console.error('Error fetching user data:', error);
+
+      if (rolesResult.error) {
+        throw rolesResult.error;
+      }
+
+      if (invitesResult.error) {
+        throw invitesResult.error;
+      }
+
+      const profileData = resolvedProfile;
+      const roleData = (rolesResult.data as UserRole[] | null) ?? [];
+      const inviteData = (invitesResult.data as Invite[] | null) ?? [];
+      const resolvedUniversity = (profileResult.data as University | null) ?? null;
+      const resolvedUniversityId = profileData?.university_id ?? resolvedUniversity?.id ?? null;
+      const resolvedRole =
+        resolveHighestRole(roleData, resolvedUniversityId) ??
+        (syncData?.role as AppRole | null) ??
+        null;
+
+      return {
+        profile: profileData,
+        university: resolvedUniversity,
+        role: resolvedRole,
+        pendingInvites: inviteData,
+      };
+    }, REQUEST_TIMEOUT_MS);
+
+    pendingContextRequestsRef.current.set(userId, request);
+
+    try {
+      const snapshot = await request;
+      userContextCacheRef.current.set(userId, snapshot);
+      return snapshot;
+    } finally {
+      pendingContextRequestsRef.current.delete(userId);
     }
   };
 
   useEffect(() => {
-    // Set up auth state listener BEFORE checking session
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
+    let isMounted = true;
 
-        if (newSession?.user) {
-          // Use setTimeout to avoid potential race conditions
-          setTimeout(() => fetchUserData(newSession.user.id), 0);
-        } else {
-          setProfile(null);
-          setRole(null);
+    const resolveSession = async (
+      nextSession: Session | null,
+      source: string,
+      options?: { forceRefresh?: boolean }
+    ) => {
+      const requestId = ++authRequestIdRef.current;
+      const resolvedUser = nextSession?.user ?? null;
+      const forceRefresh = options?.forceRefresh ?? false;
+
+      if (!isMounted) {
+        return;
+      }
+
+      setSession(nextSession);
+      setUser(resolvedUser);
+
+      if (!resolvedUser) {
+        resetState();
+        clearTenantScope();
+        if (requestId === authRequestIdRef.current) {
+          setIsSessionReady(true);
+          setIsProfileLoaded(true);
+          setIsReady(true);
         }
-        setLoading(false);
+        return;
       }
-    );
 
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
-      setSession(existingSession);
-      setUser(existingSession?.user ?? null);
+      setIsSessionReady(true);
+      setIsProfileLoaded(false);
+      setIsReady(false);
 
-      if (existingSession?.user) {
-        fetchUserData(existingSession.user.id);
+      try {
+        const snapshot = await fetchUserData(resolvedUser.id, resolvedUser.email, forceRefresh);
+        if (!isMounted || requestId !== authRequestIdRef.current) {
+          return;
+        }
+
+        applyUserContext(snapshot);
+      } catch (error) {
+        console.error(`Error resolving auth state from ${source}:`, error);
+        if (!isMounted || requestId !== authRequestIdRef.current) {
+          return;
+        }
+        resetState();
+      } finally {
+        if (isMounted && requestId === authRequestIdRef.current) {
+          setIsProfileLoaded(true);
+          setIsReady(true);
+        }
       }
-      setLoading(false);
+    };
+
+    const loadingTimeoutId = window.setTimeout(() => {
+      if (!isMounted) {
+        return;
+      }
+
+      console.warn(`[perf] auth initialization exceeded ${REQUEST_TIMEOUT_MS}ms; waiting for profile context before redirecting`);
+    }, REQUEST_TIMEOUT_MS);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (newSession?.user) {
+        setIsReady(false);
+        setIsProfileLoaded(false);
+      }
+
+      await resolveSession(newSession, `auth:${event}`, {
+        forceRefresh: event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED',
+      });
     });
 
-    return () => subscription.unsubscribe();
+    void supabase.auth
+      .getSession()
+      .then(({ data: { session: existingSession } }) => resolveSession(existingSession, 'getSession'))
+      .catch((error) => {
+        console.error('Error loading session:', error);
+        if (isMounted) {
+          setIsSessionReady(true);
+          setIsProfileLoaded(true);
+          setIsReady(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(loadingTimeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
+
+  const refreshUserContext = async () => {
+    if (!user?.id) return;
+
+    setIsProfileLoaded(false);
+    setIsReady(false);
+
+    try {
+      userContextCacheRef.current.delete(user.id);
+      clearTenantScope(profile?.university_id ?? university?.id ?? undefined);
+      const snapshot = await fetchUserData(user.id, user.email, true);
+      applyUserContext(snapshot);
+    } finally {
+      setIsProfileLoaded(true);
+      setIsReady(true);
+    }
+  };
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -126,33 +338,113 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
     setUser(null);
     setSession(null);
-    setProfile(null);
-    setRole(null);
+    resetState();
+    setIsSessionReady(true);
+    setIsProfileLoaded(true);
+    setIsReady(true);
+    userContextCacheRef.current.clear();
+    pendingContextRequestsRef.current.clear();
+    clearTenantScope();
+    void supabase.auth.signOut().catch((error) => {
+      console.error('Error signing out:', error);
+    });
+  };
+
+  const acceptInvite = async (inviteId: string) => {
+    const { error } = await supabase.rpc('accept_invite' as any, { _invite_id: inviteId });
+
+    if (!error) {
+      await refreshUserContext();
+    }
+
+    return { error };
+  };
+
+  const rejectInvite = async (inviteId: string) => {
+    const { error } = await supabase
+      .from('invites' as any)
+      .update({ status: 'rejected' })
+      .eq('id', inviteId);
+
+    if (!error) {
+      await refreshUserContext();
+    }
+
+    return { error };
   };
 
   const hasRole = (requiredRole: AppRole): boolean => {
     if (!role) return false;
+    if (role === 'super_admin') return true;
+    if (requiredRole === 'super_admin') return role === 'super_admin';
     return roleHierarchy[role] >= roleHierarchy[requiredRole];
   };
 
-  const value = {
+  const isSuperAdmin = role === 'super_admin';
+  const universityId = profile?.university_id ?? university?.id ?? null;
+  const needsUniversitySetup =
+    !!user &&
+    isProfileLoaded &&
+    !isSuperAdmin &&
+    !profile?.university_id &&
+    pendingInvites.length === 0;
+  const loading = !isReady;
+
+  useEffect(() => {
+    console.log({
+      isReady,
+      user_id: user?.id ?? null,
+      university_id: profile?.university_id ?? null,
+      role,
+      loading,
+      isSessionReady,
+      isProfileLoaded,
+    });
+  }, [isProfileLoaded, isReady, isSessionReady, loading, profile?.university_id, role, user?.id]);
+
+  const value = useMemo(() => ({
     user,
     session,
     profile,
+    university,
+    universityId,
     role,
+    pendingInvites,
     loading,
+    isReady,
+    isSessionReady,
+    isProfileLoaded,
+    isSuperAdmin,
+    needsUniversitySetup,
     signIn,
     signUp,
     signOut,
+    acceptInvite,
+    rejectInvite,
+    refreshUserContext,
     hasRole,
     isAdmin: role === 'admin',
-    isFaculty: role === 'faculty' || role === 'admin',
-    isStudentCoordinator: role === 'student_coordinator' || role === 'faculty' || role === 'admin',
+    isFaculty: role === 'faculty' || role === 'admin' || role === 'super_admin',
+    isStudentCoordinator:
+      role === 'student_coordinator' || role === 'faculty' || role === 'admin' || role === 'super_admin',
     isStudent: !!role,
-  };
+  }), [
+    user,
+    session,
+    profile,
+    university,
+    universityId,
+    role,
+    pendingInvites,
+    loading,
+    isReady,
+    isSessionReady,
+    isProfileLoaded,
+    isSuperAdmin,
+    needsUniversitySetup,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

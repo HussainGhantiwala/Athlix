@@ -22,6 +22,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { format } from 'date-fns';
+import { getTenantScope } from '@/lib/tenant-scope';
 
 interface DashboardStats {
   totalUniversities: number;
@@ -43,7 +44,7 @@ interface PendingItem {
 }
 
 export default function AdminDashboard() {
-  const { profile } = useAuth();
+  const { profile, university, universityId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     totalUniversities: 0,
@@ -60,41 +61,105 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [isSuperAdmin, universityId]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
-    await Promise.all([fetchStats(), fetchPendingItems(), fetchRecentActivity()]);
+    await Promise.all([
+      fetchStats(),
+      fetchPendingItems(),
+      ...(isSuperAdmin ? [fetchRecentActivity()] : [Promise.resolve(setRecentActivity([]))]),
+    ]);
     setLoading(false);
   };
 
   const fetchStats = async () => {
+    if (!isSuperAdmin && !universityId) {
+      setStats({
+        totalUniversities: 0,
+        totalEvents: 0,
+        activeEvents: 0,
+        pendingEvents: 0,
+        totalTeams: 0,
+        liveMatches: 0,
+        pendingBudgets: 0,
+        totalParticipants: 0,
+      });
+      return;
+    }
+
+    const tenantScope = !isSuperAdmin && universityId ? await getTenantScope(universityId) : null;
+
+    let universitiesQuery = supabase.from('universities').select('id', { count: 'exact', head: true });
+    let totalEventsQuery = supabase.from('events').select('id', { count: 'exact', head: true });
+    let activeEventsQuery = supabase.from('events').select('id', { count: 'exact', head: true }).eq('status', 'active');
+    let pendingEventsQuery = supabase.from('events').select('id', { count: 'exact', head: true }).eq('status', 'pending_approval');
+    let teamsQuery = supabase.from('teams').select('id', { count: 'exact', head: true });
+    let registrationsQuery = supabase.from('registrations').select('id', { count: 'exact', head: true });
+
+    if (!isSuperAdmin && universityId) {
+      totalEventsQuery = totalEventsQuery.eq('university_id', universityId);
+      activeEventsQuery = activeEventsQuery.eq('university_id', universityId);
+      pendingEventsQuery = pendingEventsQuery.eq('university_id', universityId);
+      teamsQuery = teamsQuery.eq('university_id', universityId);
+      registrationsQuery = registrationsQuery.eq('university_id', universityId);
+      universitiesQuery = universitiesQuery.eq('id', universityId);
+    }
+
     const [
       universitiesRes,
-      eventsRes,
+      totalEventsRes,
+      activeEventsRes,
+      pendingEventsRes,
       teamsRes,
-      matchesRes,
-      budgetsRes,
       registrationsRes,
     ] = await Promise.all([
-      supabase.from('universities').select('id', { count: 'exact' }),
-      supabase.from('events').select('id, status', { count: 'exact' }),
-      supabase.from('teams').select('id', { count: 'exact' }),
-      supabase.from('matches').select('id, status', { count: 'exact' }),
-      supabase.from('budgets').select('id, status', { count: 'exact' }),
-      supabase.from('registrations').select('id', { count: 'exact' }),
+      universitiesQuery,
+      totalEventsQuery,
+      activeEventsQuery,
+      pendingEventsQuery,
+      teamsQuery,
+      registrationsQuery,
     ]);
 
-    const activeEvents = eventsRes.data?.filter(e => e.status === 'active').length || 0;
-    const pendingEvents = eventsRes.data?.filter(e => e.status === 'pending_approval').length || 0;
-    const liveMatches = matchesRes.data?.filter(m => m.status === 'live').length || 0;
-    const pendingBudgets = budgetsRes.data?.filter(b => b.status === 'submitted').length || 0;
+    let liveMatches = 0;
+    let pendingBudgets = 0;
+
+    if (isSuperAdmin) {
+      const [{ count: liveMatchesCount }, { count: pendingBudgetsCount }] = await Promise.all([
+        supabase.from('matches').select('id', { count: 'exact', head: true }).eq('status', 'live'),
+        supabase.from('budgets').select('id', { count: 'exact', head: true }).eq('status', 'submitted'),
+      ]);
+
+      liveMatches = liveMatchesCount || 0;
+      pendingBudgets = pendingBudgetsCount || 0;
+    } else if (tenantScope) {
+      if (tenantScope.eventSportIds.length > 0) {
+        const { count } = await supabase
+          .from('matches')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'live')
+          .in('event_sport_id', tenantScope.eventSportIds);
+
+        liveMatches = count || 0;
+      }
+
+      if (tenantScope.eventIds.length > 0) {
+        const { count } = await supabase
+          .from('budgets')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'submitted')
+          .in('event_id', tenantScope.eventIds);
+
+        pendingBudgets = count || 0;
+      }
+    }
 
     setStats({
       totalUniversities: universitiesRes.count || 0,
-      totalEvents: eventsRes.count || 0,
-      activeEvents,
-      pendingEvents,
+      totalEvents: totalEventsRes.count || 0,
+      activeEvents: activeEventsRes.count || 0,
+      pendingEvents: pendingEventsRes.count || 0,
       totalTeams: teamsRes.count || 0,
       liveMatches,
       pendingBudgets,
@@ -103,15 +168,26 @@ export default function AdminDashboard() {
   };
 
   const fetchPendingItems = async () => {
-    const items: PendingItem[] = [];
+    if (!isSuperAdmin && !universityId) {
+      setPendingItems([]);
+      return;
+    }
 
-    // Pending events
-    const { data: pendingEvents } = await supabase
+    const items: PendingItem[] = [];
+    const tenantScope = !isSuperAdmin && universityId ? await getTenantScope(universityId) : null;
+
+    let pendingEventsQuery = supabase
       .from('events')
       .select('id, name, created_at, university:universities(short_name)')
       .eq('status', 'pending_approval')
       .order('created_at', { ascending: false })
       .limit(5);
+
+    if (!isSuperAdmin && universityId) {
+      pendingEventsQuery = pendingEventsQuery.eq('university_id', universityId);
+    }
+
+    const { data: pendingEvents } = await pendingEventsQuery;
 
     pendingEvents?.forEach(e => {
       items.push({
@@ -123,13 +199,22 @@ export default function AdminDashboard() {
       });
     });
 
-    // Pending budgets
-    const { data: pendingBudgets } = await supabase
-      .from('budgets')
-      .select('id, title, created_at, event:events(name)')
-      .eq('status', 'submitted')
-      .order('created_at', { ascending: false })
-      .limit(5);
+    let pendingBudgets: any[] | null = [];
+    if (isSuperAdmin || (tenantScope && tenantScope.eventIds.length > 0)) {
+      let pendingBudgetsQuery = supabase
+        .from('budgets')
+        .select('id, title, created_at, event:events(name)')
+        .eq('status', 'submitted')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!isSuperAdmin && tenantScope) {
+        pendingBudgetsQuery = pendingBudgetsQuery.in('event_id', tenantScope.eventIds);
+      }
+
+      const budgetsRes = await pendingBudgetsQuery;
+      pendingBudgets = budgetsRes.data || [];
+    }
 
     pendingBudgets?.forEach(b => {
       items.push({
@@ -141,13 +226,18 @@ export default function AdminDashboard() {
       });
     });
 
-    // Pending teams
-    const { data: pendingTeams } = await supabase
+    let pendingTeamsQuery = supabase
       .from('teams')
       .select('id, name, created_at, university:universities(short_name)')
       .eq('status', 'pending_approval')
       .order('created_at', { ascending: false })
       .limit(5);
+
+    if (!isSuperAdmin && universityId) {
+      pendingTeamsQuery = pendingTeamsQuery.eq('university_id', universityId);
+    }
+
+    const { data: pendingTeams } = await pendingTeamsQuery;
 
     pendingTeams?.forEach(t => {
       items.push({
@@ -191,20 +281,24 @@ export default function AdminDashboard() {
               {getGreeting()}, {profile?.full_name?.split(' ')[0] || 'Admin'}! 👋
             </h1>
             <p className="text-muted-foreground">
-              Sports Director Dashboard — Full administrative access
+              {isSuperAdmin
+                ? 'Super admin dashboard — access across every university'
+                : `${university?.name || 'University'} admin dashboard — manage your tenant workspace`}
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" asChild>
-              <Link to="/admin/reports">
-                <FileText className="mr-2 h-4 w-4" />
-                Generate Reports
-              </Link>
-            </Button>
+            {isSuperAdmin && (
+              <Button variant="outline" asChild>
+                <Link to="/admin/reports">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Generate Reports
+                </Link>
+              </Button>
+            )}
             <Button asChild>
-              <Link to="/admin/events/new">
+              <Link to="/admin/events">
                 <Calendar className="mr-2 h-4 w-4" />
-                Create Event
+                {isSuperAdmin ? 'View Events' : 'Create Event'}
               </Link>
             </Button>
           </div>
@@ -219,10 +313,10 @@ export default function AdminDashboard() {
           ) : (
             <>
               <StatsCard
-                title="Universities"
-                value={stats.totalUniversities}
+                title={isSuperAdmin ? 'Universities' : 'My University'}
+                value={isSuperAdmin ? stats.totalUniversities : university?.short_name || university?.name || '1'}
                 icon={Building2}
-                description="Registered institutions"
+                description={isSuperAdmin ? 'Registered institutions' : 'Current tenant'}
               />
               <StatsCard
                 title="Total Events"
@@ -336,15 +430,17 @@ export default function AdminDashboard() {
             <h2 className="text-lg font-display font-bold mb-4">Quick Actions</h2>
             <div className="grid grid-cols-2 gap-3">
               <Link
-                to="/admin/universities"
+                to={isSuperAdmin ? "/admin/universities" : "/admin/coordinators"}
                 className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
               >
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Building2 className="h-5 w-5 text-primary" />
+                  {isSuperAdmin ? <Building2 className="h-5 w-5 text-primary" /> : <Users className="h-5 w-5 text-primary" />}
                 </div>
                 <div>
-                  <p className="font-medium text-sm">Universities</p>
-                  <p className="text-xs text-muted-foreground">Manage institutions</p>
+                  <p className="font-medium text-sm">{isSuperAdmin ? 'Universities' : 'Users & Invites'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isSuperAdmin ? 'Manage institutions' : 'Invite and assign roles'}
+                  </p>
                 </div>
               </Link>
               <Link
@@ -367,8 +463,8 @@ export default function AdminDashboard() {
                   <Users className="h-5 w-5 text-status-live" />
                 </div>
                 <div>
-                  <p className="font-medium text-sm">Coordinators</p>
-                  <p className="text-xs text-muted-foreground">Assign roles</p>
+                  <p className="font-medium text-sm">Members</p>
+                  <p className="text-xs text-muted-foreground">Tenant access</p>
                 </div>
               </Link>
               <Link
@@ -395,23 +491,26 @@ export default function AdminDashboard() {
                   <p className="text-xs text-muted-foreground">View all matches</p>
                 </div>
               </Link>
-              <Link
-                to="/admin/analytics"
-                className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
-              >
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <BarChart3 className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium text-sm">Analytics</p>
-                  <p className="text-xs text-muted-foreground">View statistics</p>
-                </div>
-              </Link>
+              {isSuperAdmin && (
+                <Link
+                  to="/admin/analytics"
+                  className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <BarChart3 className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Analytics</p>
+                    <p className="text-xs text-muted-foreground">View statistics</p>
+                  </div>
+                </Link>
+              )}
             </div>
           </div>
         </div>
 
         {/* Recent Activity */}
+        {isSuperAdmin && (
         <div className="dashboard-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-display font-bold">Recent Activity</h2>
@@ -456,6 +555,7 @@ export default function AdminDashboard() {
             <p className="text-center text-muted-foreground py-8">No recent activity</p>
           )}
         </div>
+        )}
       </div>
     </DashboardLayout>
   );
