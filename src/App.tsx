@@ -36,6 +36,7 @@ const Registrations = React.lazy(() => import("./pages/Registrations"));
 const AdminCoordinators = React.lazy(() => import("./pages/admin/AdminCoordinators"));
 const Budgets = React.lazy(() => import("./pages/Budgets"));
 const Analytics = React.lazy(() => import("./pages/Analytics"));
+const AdminReports = React.lazy(() => import("./pages/admin/AdminReports"));
 const Bracket = React.lazy(() => import("./pages/Bracket"));
 
 const RegistrationFormManager = React.lazy(() => import("./components/coordinator/RegistrationFormManager"));
@@ -109,9 +110,9 @@ const App = () => (
             <Route path="/admin/matches/*" element={<ProtectedRoute requiredRole="admin"><Lazy><Matches /></Lazy></ProtectedRoute>} />
             <Route path="/admin/budgets" element={<ProtectedRoute requiredRole="admin"><Lazy><Budgets /></Lazy></ProtectedRoute>} />
             <Route path="/admin/budgets/*" element={<ProtectedRoute requiredRole="admin"><Lazy><Budgets /></Lazy></ProtectedRoute>} />
-            <Route path="/admin/analytics" element={<ProtectedRoute requiredRole="super_admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
+            <Route path="/admin/analytics" element={<ProtectedRoute requiredRole="admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
             <Route path="/admin/coordinators" element={<ProtectedRoute requiredRole="admin"><Lazy><AdminCoordinators /></Lazy></ProtectedRoute>} />
-            <Route path="/admin/reports" element={<ProtectedRoute requiredRole="super_admin"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
+            <Route path="/admin/reports" element={<ProtectedRoute requiredRole="admin"><Lazy><AdminReports /></Lazy></ProtectedRoute>} />
             <Route path="/admin/registration-approval" element={<ProtectedRoute requiredRole="admin"><Lazy><RegistrationApproval /></Lazy></ProtectedRoute>} />
             <Route path="/admin/form-approval" element={<ProtectedRoute requiredRole="admin"><Lazy><AdminFormApproval /></Lazy></ProtectedRoute>} />
             <Route path="/admin/rule-book" element={<ProtectedRoute requiredRole="admin"><Lazy><RuleBookManager /></Lazy></ProtectedRoute>} />
@@ -148,6 +149,8 @@ const App = () => (
             <Route path="/coordinator/registrations/*" element={<ProtectedRoute requiredRole="student_coordinator"><Lazy><Registrations /></Lazy></ProtectedRoute>} />
             <Route path="/coordinator/teams" element={<ProtectedRoute requiredRole="student_coordinator"><Lazy><Teams /></Lazy></ProtectedRoute>} />
             <Route path="/coordinator/teams/*" element={<ProtectedRoute requiredRole="student_coordinator"><Lazy><Teams /></Lazy></ProtectedRoute>} />
+            <Route path="/coordinator/analytics" element={<ProtectedRoute requiredRole="student_coordinator"><Lazy><Analytics /></Lazy></ProtectedRoute>} />
+            <Route path="/coordinator/reports" element={<ProtectedRoute requiredRole="student_coordinator"><Lazy><AdminReports /></Lazy></ProtectedRoute>} />
 
             {/* ==================== STUDENT ROUTES ==================== */}
             <Route path="/student/bracket/:eventId" element={<ProtectedRoute><Lazy><Bracket /></Lazy></ProtectedRoute>} />
@@ -167,7 +170,8 @@ const App = () => (
             <Route path="/registrations" element={<ProtectedRoute requiredRole="student_coordinator"><RoleRedirect target="registrations" /></ProtectedRoute>} />
             <Route path="/budgets" element={<ProtectedRoute requiredRole="faculty"><RoleRedirect target="budgets" /></ProtectedRoute>} />
             <Route path="/universities" element={<ProtectedRoute requiredRole="super_admin"><Navigate to="/admin/universities" replace /></ProtectedRoute>} />
-            <Route path="/analytics" element={<ProtectedRoute requiredRole="super_admin"><Navigate to="/admin/analytics" replace /></ProtectedRoute>} />
+            <Route path="/analytics" element={<ProtectedRoute><Lazy><Analytics /></Lazy></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute><Lazy><AdminReports /></Lazy></ProtectedRoute>} />
 
             {/* Catch-all */}
             <Route path="*" element={<NotFound />} />
