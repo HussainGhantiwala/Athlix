@@ -17,6 +17,7 @@ interface TournamentTypeModalProps {
   onOpenChange: (open: boolean) => void;
   onSelect: (type: TournamentType) => void;
   loading?: boolean;
+  teamCount?: number;
 }
 
 const types: { value: TournamentType; label: string; description: string; icon: React.ReactNode }[] = [
@@ -40,8 +41,19 @@ const types: { value: TournamentType; label: string; description: string; icon: 
   },
 ];
 
-export default function TournamentTypeModal({ open, onOpenChange, onSelect, loading }: TournamentTypeModalProps) {
+export default function TournamentTypeModal({ open, onOpenChange, onSelect, loading, teamCount = 0 }: TournamentTypeModalProps) {
   const [selected, setSelected] = useState<TournamentType | null>(null);
+
+  // Power of 2 logic for Knockout
+  const getBracketSize = (n: number) => {
+    let p = 1;
+    while (p < n) p *= 2;
+    return p;
+  };
+  
+  const bracketSize = getBracketSize(teamCount);
+  const byesNeeded = Math.max(0, bracketSize - teamCount);
+  const realR1Matches = teamCount > 0 ? (teamCount - byesNeeded) / 2 : 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -74,6 +86,48 @@ export default function TournamentTypeModal({ open, onOpenChange, onSelect, load
               </div>
             </button>
           ))}
+          
+          {selected === 'knockout' && teamCount > 0 && (
+            <div className="mt-4 p-4 border rounded-lg bg-muted/30 text-sm space-y-4 animate-in fade-in slide-in-from-top-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-muted-foreground mb-1">Registered Teams</p>
+                  <p className="font-semibold text-lg">{teamCount}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground mb-1">Bracket Size</p>
+                  <p className="font-semibold text-lg">{bracketSize}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground mb-1">BYEs Needed</p>
+                  <p className="font-semibold text-lg">{byesNeeded}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground mb-1">Round 1 Matches</p>
+                  <p className="font-semibold text-lg">{realR1Matches}</p>
+                </div>
+              </div>
+              
+              <div className="border-t pt-4 grid grid-cols-2 gap-3">
+                <label className="flex flex-row items-center space-x-2 cursor-pointer touch-none">
+                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground focus:ring-accent" checked readOnly/>
+                  <span className="font-medium">Random Draw</span>
+                </label>
+                <label className="flex flex-row items-center space-x-2 cursor-pointer touch-none">
+                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground focus:ring-accent" checked readOnly/>
+                  <span className="font-medium">Balanced BYEs</span>
+                </label>
+                <label className="flex flex-row items-center space-x-2 opacity-50 cursor-not-allowed">
+                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground rounded-sm" disabled />
+                  <span className="font-medium flex flex-col">Seed Top Teams <span className="text-[10px] text-muted-foreground">Coming Soon</span></span>
+                </label>
+                <label className="flex flex-row items-center space-x-2 opacity-50 cursor-not-allowed">
+                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground rounded-sm" disabled />
+                  <span className="font-medium flex flex-col">Manual Seeding <span className="text-[10px] text-muted-foreground">Coming Soon</span></span>
+                </label>
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

@@ -49,7 +49,7 @@ export default function Teams() {
     let query = supabase
       .from('teams')
       .select(`
-        id, name, status, captain_id, university_id, event_sport_id, created_at,
+        id, name, status, captain_id, university_id, event_sport_id, created_at, source,
         university:universities(name, short_name),
         event_sport:event_sports(
           sport_category:sports_categories(name, icon),
@@ -261,9 +261,18 @@ export default function Teams() {
                         <StatusBadge status={team.status} />
                       </div>
 
-                      <div className="text-sm text-muted-foreground">
-                        <p>{(team as any).event_sport?.sport_category?.name}</p>
-                        <p className="truncate">{(team as any).event_sport?.event?.name}</p>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <div className="flex-1 min-w-0">
+                          <p>{(team as any).event_sport?.sport_category?.name}</p>
+                          <p className="truncate">{(team as any).event_sport?.event?.name}</p>
+                        </div>
+                        {(() => {
+                          const src = (team as any).source as string | undefined;
+                          if (src === 'registered') return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-status-live/15 text-status-live">Registered</span>;
+                          if (src === 'demo') return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">Demo</span>;
+                          if (src === 'imported') return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent/15 text-accent-foreground">Imported</span>;
+                          return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">Manual</span>;
+                        })()}
                       </div>
 
                       <div className="flex items-center justify-between pt-3 border-t border-border">

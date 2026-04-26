@@ -19,6 +19,8 @@ import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
+import { createTeamFromRegistration } from '@/lib/registration-approval-service';
+
 export default function Registrations() {
   const { user, isAdmin, isFaculty, isStudentCoordinator } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -69,10 +71,36 @@ export default function Registrations() {
 
     if (error) {
       toast.error('Failed to update registration');
-    } else {
-      toast.success(`Registration ${newStatus}`);
-      fetchRegistrations();
+      return;
     }
+
+    // On approval, create the team row so MatchGenerator can find it
+    if (newStatus === 'approved' && user?.id) {
+      const reg = registrations.find(r => r.id === registrationId);
+      if (reg) {
+        const { error: teamError } = await createTeamFromRegistration(
+          {
+            id: reg.id,
+            event_sport_id: reg.event_sport_id,
+            user_id: reg.user_id,
+            university_id: (reg as any).university_id || null,
+            registration_data: reg.registration_data || null,
+          },
+          user.id
+        );
+        if (teamError) {
+          console.error('[Registrations] Team creation failed:', teamError);
+          toast.warning('Registration approved but team creation failed: ' + teamError);
+        } else {
+          toast.success('Registration approved & team created!');
+          fetchRegistrations();
+          return;
+        }
+      }
+    }
+
+    toast.success(`Registration ${newStatus}`);
+    fetchRegistrations();
   };
 
   const filteredRegistrations = registrations.filter((reg) =>

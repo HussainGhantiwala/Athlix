@@ -1,12 +1,22 @@
 export type AppRole = 'super_admin' | 'admin' | 'faculty' | 'student_coordinator' | 'student';
 export type EventStatus = 'draft' | 'pending_approval' | 'approved' | 'active' | 'completed' | 'cancelled';
-export type MatchStatus = 'scheduled' | 'live' | 'completed' | 'cancelled' | 'completed_provisional' | 'finalized';
+export type MatchStatus = 'scheduled' | 'live' | 'completed' | 'cancelled' | 'completed_provisional' | 'finalized' | 'paused';
 export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
 export type TeamStatus = 'forming' | 'pending_approval' | 'approved' | 'locked';
 export type BudgetStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
 export type InviteStatus = 'pending' | 'accepted' | 'rejected';
 export type TournamentType = 'knockout' | 'group' | 'league';
 export type ResultStatus = 'pending' | 'completed' | 'advanced' | 'eliminated' | 'draw' | 'final';
+
+export const MatchStatusEnum = {
+  Scheduled: 'scheduled' as MatchStatus,
+  Live: 'live' as MatchStatus,
+  Completed: 'completed' as MatchStatus,
+  Cancelled: 'cancelled' as MatchStatus,
+  Provisional: 'completed_provisional' as MatchStatus,
+  Finalized: 'finalized' as MatchStatus,
+  Paused: 'paused' as MatchStatus,
+} as const;
 
 export interface Profile {
   id: string;
@@ -150,6 +160,8 @@ export interface Team {
   created_by?: string;
   created_at: string;
   updated_at: string;
+  source?: 'registered' | 'demo' | 'manual' | 'imported';
+  registration_submission_id?: string;
   university?: University;
   members?: TeamMember[];
   players?: TeamPlayer[];
@@ -189,6 +201,8 @@ export interface Match {
   scheduled_at: string;
   round?: string;
   match_number?: number;
+  is_bye_match?: boolean;
+  is_placeholder?: boolean;
   status: MatchStatus;
   current_editor_id?: string;
   editor_locked_at?: string;
@@ -228,6 +242,18 @@ export interface Match {
   venue?: Venue;
   event_sport?: EventSport;
   scores?: Score[];
+  // Participant fields (individual/non-team matches)
+  participant_a_id?: string;
+  participant_b_id?: string;
+  participant_a_name?: string;
+  participant_b_name?: string;
+  participant_a?: { id?: string; name?: string } | null;
+  participant_b?: { id?: string; name?: string } | null;
+  // Score & result fields
+  score_data?: Record<string, any> | null;
+  winner_name?: string | null;
+  winner_participant_id?: string;
+  round_number?: number;
 }
 
 export interface Score {

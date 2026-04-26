@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -89,7 +89,7 @@ export default function ScoreControlPanel() {
     setLoading(true);
     const [liveRes, scheduledRes, completedRes] = await Promise.all([
       supabase.from('matches').select(matchSelect).eq('status', 'live').order('started_at', { ascending: false }),
-      supabase.from('matches').select(matchSelect).eq('status', 'scheduled').order('scheduled_at').limit(20),
+      supabase.from('matches').select(matchSelect).eq('status', 'scheduled').or('is_placeholder.is.null,is_placeholder.eq.false').order('scheduled_at').limit(20),
       supabase.from('matches').select(matchSelect).eq('status', 'completed').order('completed_at', { ascending: false }).limit(10),
     ]);
     if (liveRes.error || scheduledRes.error || completedRes.error) {
