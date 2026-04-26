@@ -14,6 +14,16 @@ function nextPowerOf2(n: number): number {
   return p;
 }
 
+/** Fisher-Yates (Knuth) shuffle - unbiased. */
+function shuffle<T>(items: T[]): T[] {
+  const cloned = [...items];
+  for (let i = cloned.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cloned[i], cloned[j]] = [cloned[j], cloned[i]];
+  }
+  return cloned;
+}
+
 type TournamentRound = 'group_stage' | 'round_of_16' | 'quarterfinal' | 'semifinal' | 'final';
 
 const MATCH_PHASE_NOT_STARTED = 'not_started';
@@ -35,14 +45,6 @@ function getKnockoutRoundByMatchCount(matchesInRound: number): TournamentRound {
   return 'final';
 }
 
-function getNextKnockoutRound(round: string | null | undefined): TournamentRound | null {
-  const normalized = normalizeRound(round);
-  if (!normalized) return null;
-  const idx = KNOCKOUT_ROUNDS.indexOf(normalized as TournamentRound);
-  if (idx < 0 || idx >= KNOCKOUT_ROUNDS.length - 1) return null;
-  return KNOCKOUT_ROUNDS[idx + 1];
-}
-
 function isKnockoutRound(round: string | null | undefined): boolean {
   const normalized = normalizeRound(round);
   return !!normalized && KNOCKOUT_ROUNDS.includes(normalized as TournamentRound);
@@ -52,7 +54,6 @@ async function resolveGroupId(groupName: string): Promise<number> {
   if (groupIdCache.has(groupName)) {
     return groupIdCache.get(groupName)!;
   }
-
   const groupsClient = supabase as any;
   const withPrefix = await groupsClient.from('groups').select('id').eq('name', `Group ${groupName}`).maybeSingle();
   if (withPrefix.data?.id) {
@@ -60,34 +61,38 @@ async function resolveGroupId(groupName: string): Promise<number> {
     groupIdCache.set(groupName, id);
     return id;
   }
-
   const plain = await groupsClient.from('groups').select('id').eq('name', groupName).maybeSingle();
   if (plain.data?.id) {
     const id = Number(plain.data.id);
     groupIdCache.set(groupName, id);
     return id;
   }
-
   throw new Error(`Group "${groupName}" not found. Create groups before generating group-stage matches.`);
 }
 
 async function placeWinnerInNextMatch(nextMatchId: string, winnerTeamId: string) {
   const { data: nextMatch, error: nextMatchError } = await supabase
     .from('matches')
-    .select('id, team_a_id, team_b_id')
+    .select('id, team_a_id, team_b_id, is_placeholder, status')
     .eq('id', nextMatchId)
     .single();
-
   if (nextMatchError || !nextMatch) return;
-
-  const slotUpdate: { team_a_id?: string; team_b_id?: string } = {};
+  const slotUpdate: any = {};
   if (!nextMatch.team_a_id) {
     slotUpdate.team_a_id = winnerTeamId;
   } else if (!nextMatch.team_b_id) {
     slotUpdate.team_b_id = winnerTeamId;
   }
-
   if (Object.keys(slotUpdate).length > 0) {
+    const willHaveA = slotUpdate.team_a_id || nextMatch.team_a_id;
+    const willHaveB = slotUpdate.team_b_id || nextMatch.team_b_id;
+
+    if (willHaveA && willHaveB) {
+      slotUpdate.is_placeholder = false;
+      slotUpdate.status = 'scheduled';
+      slotUpdate.phase = MATCH_PHASE_NOT_STARTED;
+    }
+
     await supabase.from('matches').update(slotUpdate).eq('id', nextMatchId);
   }
 }
@@ -98,10 +103,23 @@ interface GenerateResult {
   matchCount?: number;
 }
 
-/**
- * Knockout: Only generates Round 1 matches.
- * Future rounds are created dynamically when winners emerge.
- */
+// KNOCKOUT - Pre-creates ALL rounds with next_match_id links.
+// Helper to generate a standard seeding array recursively for nice BYE distribution
+function getStandardSeedOrder(bracketSize: number): number[] {
+  let order = [1, 2];
+  while (order.length < bracketSize) {
+    const nextSize = order.length * 2;
+    const nextOrder: number[] = [];
+    for (const seed of order) {
+      nextOrder.push(seed, nextSize + 1 - seed);
+    }
+    order = nextOrder;
+  }
+  return order;
+}
+
+// KNOCKOUT - Pre-creates ALL rounds with next_match_id links.
+// Uses standard seeding distribution so BYEs are mathematically balanced.
 export async function generateKnockoutMatches(
   eventSportId: string,
   eventId: string,
@@ -113,201 +131,211 @@ export async function generateKnockoutMatches(
   if (teams.length < 2) {
     return { success: false, error: 'Need at least 2 teams for knockout.' };
   }
-
   const tenantUniversityId = requireUniversityId(universityId);
-
   const bracketSize = nextPowerOf2(teams.length);
-  const round1MatchCount = bracketSize / 2;
-  const roundLabel = getKnockoutRoundByMatchCount(round1MatchCount);
-
-  // Shuffle teams
-  const shuffled = [...teams].sort(() => Math.random() - 0.5);
-
-  // Build Round 1 slots with BYEs
-  const participants: (Team | null)[] = [];
-  for (let i = 0; i < bracketSize; i++) {
-    participants.push(i < shuffled.length ? shuffled[i] : null);
+  const totalRounds = Math.log2(bracketSize);
+  
+  // 1. Shuffle teams randomly for a fair draw
+  const shuffled = shuffle(teams);
+  
+  // 2. Map seeds to teams. (Seeds > shuffled.length will be BYEs)
+  const teamSeedMap = new Map<number, Team | null>();
+  const seedOrder = getStandardSeedOrder(bracketSize);
+  
+  for (let i = 1; i <= bracketSize; i++) {
+    if (i <= shuffled.length) {
+      teamSeedMap.set(i, shuffled[i - 1]);
+    } else {
+      teamSeedMap.set(i, null);
+    }
   }
 
+  // 3. Build the structure of round slots
+  const rounds: string[][] = [];
+  for (let r = 0; r < totalRounds; r += 1) {
+    const matchesInRound = bracketSize / Math.pow(2, r + 1);
+    const ids: string[] = [];
+    for (let m = 0; m < matchesInRound; m += 1) {
+      ids.push(crypto.randomUUID());
+    }
+    rounds.push(ids);
+  }
+
+  // 4. Link next_match_ids
+  const nextMatchLookup = new Map<string, string>();
+  for (let r = 0; r < rounds.length - 1; r += 1) {
+    for (let m = 0; m < rounds[r].length; m += 1) {
+      nextMatchLookup.set(rounds[r][m], rounds[r + 1][Math.floor(m / 2)]);
+    }
+  }
+
+  // 5. Match array construction
   const matchInserts: any[] = [];
-  for (let i = 0; i < round1MatchCount; i++) {
-    const teamA = participants[i * 2];
-    const teamB = participants[i * 2 + 1];
+  let matchNumber = 1;
+  const byeMatchesList: any[] = []; // To auto-complete later
 
-    matchInserts.push({
-      event_sport_id: eventSportId,
-      event_id: eventId,
-      university_id: tenantUniversityId,
-      sport_id: (teamA as any)?.sport_id ?? (teamB as any)?.sport_id ?? null,
-      team_a_id: teamA?.id || null,
-      team_b_id: teamB?.id || null,
-      scheduled_at: scheduledAt,
-      round: roundLabel,
-      match_number: i + 1,
-      phase: MATCH_PHASE_NOT_STARTED,
-      status: 'scheduled',
-      result_status: 'pending',
-      match_phase: MATCH_PHASE_NOT_STARTED,
-      next_match_id: null,
-      created_by: userId,
-    });
+  for (let r = 0; r < rounds.length; r += 1) {
+    const matchesInRound = rounds[r].length;
+    const roundLabel = getKnockoutRoundByMatchCount(matchesInRound);
+    
+    for (let m = 0; m < matchesInRound; m += 1) {
+      const id = rounds[r][m];
+      const nextMatchId = nextMatchLookup.get(id) ?? null;
+      
+      let teamA: Team | null = null;
+      let teamB: Team | null = null;
+      let isByeMatch = false;
+
+      // Assign slots only for Round 1
+      if (r === 0) {
+        // Pairs are adjacent in the seedOrder array
+        const seedA = seedOrder[m * 2];
+        const seedB = seedOrder[m * 2 + 1];
+        teamA = teamSeedMap.get(seedA) || null;
+        teamB = teamSeedMap.get(seedB) || null;
+        
+        // If one is missing, it's a BYE
+        if (!teamA || !teamB) {
+          isByeMatch = true;
+        }
+      }
+
+      const matchObj = {
+        id,
+        event_sport_id: eventSportId,
+        event_id: eventId,
+        university_id: tenantUniversityId,
+        sport_id: teamA?.sport_id ?? teamB?.sport_id ?? null,
+        team_a_id: teamA?.id || null,
+        team_b_id: teamB?.id || null,
+        scheduled_at: scheduledAt,
+        round: roundLabel,
+        round_number: r + 1,
+        match_number: matchNumber,
+        is_bye_match: isByeMatch,
+        is_placeholder: r > 0,
+        phase: r > 0 ? 'not_started' : MATCH_PHASE_NOT_STARTED,
+        status: isByeMatch ? 'completed' : 'scheduled',
+        result_status: isByeMatch ? 'final' : 'pending',
+        match_phase: isByeMatch ? 'completed' : MATCH_PHASE_NOT_STARTED,
+        next_match_id: nextMatchId,
+        created_by: userId,
+      };
+
+      if (isByeMatch) {
+         // Auto-advance the winner
+         const winnerId = teamA?.id || teamB?.id || null;
+         (matchObj as any).winner_team_id = winnerId;
+         (matchObj as any).winner_id = winnerId;
+         (matchObj as any).completed_at = new Date().toISOString();
+         byeMatchesList.push(matchObj);
+      }
+
+      matchInserts.push(matchObj);
+      matchNumber += 1;
+    }
   }
 
+  // Execute insert
   const { error } = await supabase.from('matches').insert(matchInserts);
-
   if (error) return { success: false, error: error.message };
 
-  const { data: insertedRound, error: fetchError } = await supabase
-    .from('matches')
-    .select('id, team_a_id, team_b_id, match_number')
-    .eq('event_sport_id', eventSportId)
-    .eq('round', roundLabel)
-    .order('match_number');
-
-  if (fetchError) return { success: false, error: fetchError.message };
-
-  // Auto-advance BYE matches
-  if (insertedRound) {
-    for (const m of insertedRound) {
-      const hasBye = (!m.team_a_id && m.team_b_id) || (m.team_a_id && !m.team_b_id);
-      if (hasBye) {
-        const winnerId = m.team_a_id || m.team_b_id;
-        await supabase.from('matches').update({
-          status: 'completed',
-          result_status: 'final',
-          winner_team_id: winnerId,
-          phase: MATCH_PHASE_FINISHED,
-          match_phase: 'completed',
-          completed_at: new Date().toISOString(),
-        }).eq('id', m.id);
-
-        // Try to create next round match if pair is also done
-        await tryCreateNextRoundMatch(m.id, eventSportId, userId, scheduledAt, tenantUniversityId);
-      }
+  // Run the placing logic sequentially for byes
+  for (const byeMatch of byeMatchesList) {
+    if (byeMatch.next_match_id && byeMatch.winner_id) {
+      await placeWinnerInNextMatch(byeMatch.next_match_id, byeMatch.winner_id);
     }
   }
 
   return { success: true, matchCount: matchInserts.length };
 }
 
-/**
- * After a knockout match completes, check if the paired match also has a winner.
- * If so, create the next round match with both winners.
- */
+// ADVANCE WINNER - Called after a knockout match completes.
+// Reads the match next_match_id and places the winner into the next match slot.
 export async function tryCreateNextRoundMatch(
   completedMatchId: string,
-  eventSportId: string,
-  userId: string,
-  scheduledAt: string,
-  universityId: string
+  _eventSportId: string,
+  _userId: string,
+  _scheduledAt: string,
+  _universityId: string
 ): Promise<string | null> {
-  const tenantUniversityId = requireUniversityId(universityId);
-  // Get completed match
   const { data: match } = await supabase
     .from('matches')
-    .select('*')
+    .select('id, next_match_id, winner_team_id, round')
     .eq('id', completedMatchId)
     .single();
-
   if (!match || !match.winner_team_id || !isKnockoutRound(match.round)) return null;
-
-  // If match already has next_match_id, place winner in the first empty slot.
-  if (match.next_match_id) {
-    await placeWinnerInNextMatch(match.next_match_id, match.winner_team_id);
-    return match.next_match_id;
-  }
-
-  // Find all matches in the same round
-  const { data: roundMatches } = await supabase
-    .from('matches')
-    .select('*')
-    .eq('event_sport_id', eventSportId)
-    .eq('round', match.round)
-    .order('match_number');
-
-  if (!roundMatches) return null;
-
-  const totalInRound = roundMatches.length;
-
-  // If only 1 match in round (it's the Final), no next round needed
-  if (totalInRound === 1) return null;
-
-  // Find pair: match_number pairs are (1,2), (3,4), (5,6)...
-  const mn = match.match_number!;
-  const pairNumber = mn % 2 === 1 ? mn + 1 : mn - 1;
-  const pairMatch = roundMatches.find(m => m.match_number === pairNumber);
-
-  if (!pairMatch) return null;
-
-  // If pair already created a next match, link to it and place our winner
-  if (pairMatch.next_match_id) {
-    await supabase.from('matches').update({ next_match_id: pairMatch.next_match_id }).eq('id', match.id);
-    await placeWinnerInNextMatch(pairMatch.next_match_id, match.winner_team_id);
-    return pairMatch.next_match_id;
-  }
-
-  // If pair doesn't have a winner yet, create the next match with only our winner
-  const nextRoundLabel = getNextKnockoutRound(match.round);
-  if (!nextRoundLabel) return null;
-  const nextMatchNumber = Math.ceil(mn / 2);
-  const isFirst = mn < pairNumber;
-
-  const teamAId = isFirst ? match.winner_team_id : (pairMatch.winner_team_id || null);
-  const teamBId = isFirst ? (pairMatch.winner_team_id || null) : match.winner_team_id;
-
-  const { error: insertError } = await supabase.from('matches').insert({
-    event_sport_id: eventSportId,
-    event_id: match.event_id ?? null,
-    university_id: (match as any).university_id ?? tenantUniversityId,
-    sport_id: match.sport_id ?? null,
-    team_a_id: teamAId,
-    team_b_id: teamBId,
-    scheduled_at: scheduledAt,
-    round: nextRoundLabel,
-    match_number: nextMatchNumber,
-    phase: MATCH_PHASE_NOT_STARTED,
-    status: 'scheduled',
-    result_status: 'pending',
-    match_phase: MATCH_PHASE_NOT_STARTED,
-    next_match_id: null,
-    created_by: userId,
-  });
-
-  if (insertError) return null;
-
-  const { data: newMatch, error: lookupError } = await supabase
-    .from('matches')
-    .select('id')
-    .eq('event_sport_id', eventSportId)
-    .eq('round', nextRoundLabel)
-    .eq('match_number', nextMatchNumber)
-    .maybeSingle();
-
-  if (lookupError || !newMatch?.id) return null;
-
-  // Update both feeder matches to point at the created next match.
-  await Promise.all([
-    supabase.from('matches').update({ next_match_id: newMatch.id }).eq('id', match.id),
-    supabase.from('matches').update({ next_match_id: newMatch.id }).eq('id', pairMatch.id),
-  ]);
-
-  return newMatch.id;
+  if (!match.next_match_id) return null;
+  await placeWinnerInNextMatch(match.next_match_id, match.winner_team_id);
+  return match.next_match_id;
 }
 
-/**
- * Legacy function kept for compatibility but now unused for knockout.
- * For knockout, use tryCreateNextRoundMatch instead.
- */
-export async function advanceWinnerToNextMatch(
-  currentMatchId: string,
-  winnerId: string,
-  nextMatchId: string,
-  matchIndex: number
-) {
-  const slot = matchIndex % 2 === 0 ? 'team_a_id' : 'team_b_id';
-  await supabase.from('matches').update({ [slot]: winnerId }).eq('id', nextMatchId);
+// END MATCH - Marks a match as completed and handles post-completion logic.
+export async function endMatch(matchId: string, winnerName: string | null = null) {
+  const normalizedWinner = winnerName?.trim() || null;
+  const completedAt = new Date().toISOString();
+  const { data: match, error: matchError } = await supabase
+    .from('matches')
+    .select(`
+      id, event_id, event_sport_id, round, group_name,
+      next_match_id, team_a_id, team_b_id, winner_id, winner_team_id,
+      participant_a_name, participant_b_name,
+      team_a:teams!matches_team_a_id_fkey(id, name),
+      team_b:teams!matches_team_b_id_fkey(id, name)
+    `)
+    .eq('id', matchId)
+    .single();
+  if (matchError) throw matchError;
+  if (isKnockoutRound(match.round) && !normalizedWinner) {
+    throw new Error('Knockout match requires a winner');
+  }
+  let winnerTeamId = match.winner_id || match.winner_team_id || null;
+  const teamAName = (match.team_a as any)?.name ?? match.participant_a_name;
+  const teamBName = (match.team_b as any)?.name ?? match.participant_b_name;
+  if (normalizedWinner && normalizedWinner === teamAName) {
+    winnerTeamId = match.team_a_id || winnerTeamId;
+  } else if (normalizedWinner && normalizedWinner === teamBName) {
+    winnerTeamId = match.team_b_id || winnerTeamId;
+  }
+  const { error: updateError } = await supabase
+    .from('matches')
+    .update({
+      status: 'completed',
+      winner_name: normalizedWinner,
+      result: normalizedWinner ? 'winner' : 'draw',
+      winner_id: winnerTeamId,
+      winner_team_id: winnerTeamId,
+      phase: MATCH_PHASE_FINISHED,
+      match_phase: 'completed',
+      result_status: 'final',
+      completed_at: completedAt,
+      end_time: completedAt,
+      current_editor_id: null,
+      editor_locked_at: null,
+    } as never)
+    .eq('id', matchId);
+  if (updateError) throw updateError;
+  if (isKnockoutRound(match.round) && match.next_match_id && winnerTeamId) {
+    await placeWinnerInNextMatch(match.next_match_id, winnerTeamId);
+    return;
+  }
+  if (match.round === 'group_stage' && match.event_sport_id && match.team_a_id && match.team_b_id) {
+    const { data: freshMatch } = await supabase
+      .from('matches')
+      .select('score_a, score_b, runs_a, runs_b')
+      .eq('id', matchId)
+      .single();
+    if (freshMatch) {
+      const scoreA = freshMatch.score_a ?? freshMatch.runs_a ?? 0;
+      const scoreB = freshMatch.score_b ?? freshMatch.runs_b ?? 0;
+      await updateStandingsAfterMatch(
+        matchId, match.event_sport_id, match.team_a_id, match.team_b_id, scoreA, scoreB
+      );
+    }
+  }
 }
 
+// GROUP STAGE - Round-robin within groups
 export async function generateGroupMatches(
   eventSportId: string,
   eventId: string,
@@ -319,26 +347,20 @@ export async function generateGroupMatches(
   if (teams.length < 4) {
     return { success: false, error: 'Need at least 4 teams for group stage.' };
   }
-
   const tenantUniversityId = requireUniversityId(universityId);
-
   const numGroups = Math.max(2, Math.ceil(teams.length / 4));
   const groupNames = 'ABCDEFGHIJKLMNOP'.split('').slice(0, numGroups);
-  const shuffled = [...teams].sort(() => Math.random() - 0.5);
-
+  const shuffled = shuffle(teams);
   const groups: Map<string, Team[]> = new Map();
   groupNames.forEach(g => groups.set(g, []));
   shuffled.forEach((team, i) => {
     const groupName = groupNames[i % numGroups];
     groups.get(groupName)!.push(team);
   });
-
   const matchInserts: any[] = [];
   let matchNum = 1;
-
   for (const [groupName, groupTeams] of groups) {
     const groupId = await resolveGroupId(groupName);
-
     for (let i = 0; i < groupTeams.length; i++) {
       for (let j = i + 1; j < groupTeams.length; j++) {
         matchInserts.push({
@@ -361,7 +383,6 @@ export async function generateGroupMatches(
         });
       }
     }
-
     const standingsInserts = groupTeams.map(team => ({
       event_id: eventId,
       event_sport_id: eventSportId,
@@ -369,16 +390,14 @@ export async function generateGroupMatches(
       team_id: team.id,
       team_name: team.name,
     }));
-
     await supabase.from('team_standings').insert(standingsInserts);
   }
-
   const { error } = await supabase.from('matches').insert(matchInserts);
   if (error) return { success: false, error: error.message };
-
   return { success: true, matchCount: matchInserts.length };
 }
 
+// LEAGUE - Full round-robin (no groups)
 export async function generateLeagueMatches(
   eventSportId: string,
   eventId: string,
@@ -390,12 +409,9 @@ export async function generateLeagueMatches(
   if (teams.length < 2) {
     return { success: false, error: 'Need at least 2 teams for league.' };
   }
-
   const tenantUniversityId = requireUniversityId(universityId);
-
   const matchInserts: any[] = [];
   let matchNum = 1;
-
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       matchInserts.push({
@@ -416,22 +432,19 @@ export async function generateLeagueMatches(
       });
     }
   }
-
   const standingsInserts = teams.map(team => ({
     event_id: eventId,
     event_sport_id: eventSportId,
     team_id: team.id,
     team_name: team.name,
   }));
-
   await supabase.from('team_standings').insert(standingsInserts);
-
   const { error } = await supabase.from('matches').insert(matchInserts);
   if (error) return { success: false, error: error.message };
-
   return { success: true, matchCount: matchInserts.length };
 }
 
+// STANDINGS - Update team_standings after a group/league match
 export async function updateStandingsAfterMatch(
   matchId: string,
   eventSportId: string,
@@ -447,9 +460,7 @@ export async function updateStandingsAfterMatch(
       .eq('event_sport_id', eventSportId)
       .eq('team_id', teamId)
       .single();
-
     if (!data) return;
-
     await supabase.from('team_standings').update({
       played: (data as any).played + 1,
       won: (data as any).won + (won ? 1 : 0),
@@ -459,7 +470,6 @@ export async function updateStandingsAfterMatch(
       goal_difference: (data as any).goal_difference + gd,
     }).eq('id', (data as any).id);
   };
-
   if (scoreA > scoreB) {
     await updateTeam(teamAId, true, false, false, scoreA - scoreB);
     await updateTeam(teamBId, false, true, false, scoreB - scoreA);
@@ -472,6 +482,7 @@ export async function updateStandingsAfterMatch(
   }
 }
 
+// GROUP -> KNOCKOUT transition
 export async function generateKnockoutFromGroupStage(
   eventSportId: string,
   eventId: string,
@@ -486,31 +497,25 @@ export async function generateKnockoutFromGroupStage(
     .order('group_name')
     .order('points', { ascending: false })
     .order('goal_difference', { ascending: false });
-
   if (!standings || standings.length === 0) {
     return { success: false, error: 'No standings found.' };
   }
-
   const groups = new Map<string, any[]>();
   (standings as any[]).forEach(s => {
     const g = s.group_name || 'A';
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g)!.push(s);
   });
-
   const qualifiedTeamIds: string[] = [];
   for (const [, groupStandings] of groups) {
     qualifiedTeamIds.push(...groupStandings.slice(0, 2).map((s: any) => s.team_id));
   }
-
   const { data: qualifiedTeams } = await supabase
     .from('teams')
     .select('*')
     .in('id', qualifiedTeamIds);
-
   if (!qualifiedTeams || qualifiedTeams.length < 2) {
     return { success: false, error: 'Not enough qualified teams.' };
   }
-
   return generateKnockoutMatches(eventSportId, eventId, qualifiedTeams as any[], userId, universityId, scheduledAt);
 }

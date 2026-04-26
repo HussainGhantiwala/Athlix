@@ -35,7 +35,7 @@ import {
   switchFootballHalf,
 } from '@/lib/match-scoring';
 import { CricketScoreData, FootballScoreData, isCricketScoreData, isFootballScoreData } from '@/types/match-scoring';
-import { TournamentService } from '@/services/TournamentService';
+import { endMatch } from '@/lib/tournament-engine';
 
 type TimerState = Record<string, boolean>;
 const toSafeInt = (value: unknown) => {
@@ -337,7 +337,7 @@ export default function MatchControlPanel() {
     }
 
     try {
-      await TournamentService.endMatch(match.id, winnerName ?? null);
+      await endMatch(match.id, winnerName ?? null);
       toast.success('Match completed');
     } catch (error) {
       setBusyMatchId(null);

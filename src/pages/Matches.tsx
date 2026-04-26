@@ -87,6 +87,7 @@ export default function Matches() {
             event:events(name)
           )
         `, { count: 'exact' })
+        .or('is_placeholder.is.null,is_placeholder.eq.false')
         .order('scheduled_at', { ascending: false })
         .range(pageIndex * PAGE_SIZE, pageIndex * PAGE_SIZE + PAGE_SIZE - 1);
 

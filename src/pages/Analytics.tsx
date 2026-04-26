@@ -103,10 +103,16 @@ type UniversityRow = {
   short_name: string;
 };
 
+type TeamRow = {
+  id: string;
+  university_id: string | null;
+};
+
 type AnalyticsSnapshot = {
   events: EventRow[];
   matches: MatchRow[];
   registrations: RegistrationRow[];
+  teams: TeamRow[];
   budgets: BudgetRow[];
   universities: UniversityRow[];
   refreshedAt: string | null;
@@ -116,6 +122,7 @@ const EMPTY_SNAPSHOT: AnalyticsSnapshot = {
   events: [],
   matches: [],
   registrations: [],
+  teams: [],
   budgets: [],
   universities: [],
   refreshedAt: null,
@@ -161,128 +168,157 @@ function formatRefreshedAt(timestamp: string | null) {
 }
 
 export default function Analytics() {
-  const { role, universityId, university } = useAuth();
+  const { role, universityId, university, isReady } = useAuth();
+  const isSuperAdmin = role === 'super_admin';
   const canViewAnalytics =
     !!role && ANALYTICS_ALLOWED_ROLES.includes(role as (typeof ANALYTICS_ALLOWED_ROLES)[number]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<AnalyticsSnapshot>(EMPTY_SNAPSHOT);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsSnapshot | null>(null);
 
   const fetchAnalytics = useCallback(
     async (withLoader = true) => {
       if (!canViewAnalytics) {
-        setSnapshot(EMPTY_SNAPSHOT);
+        setAnalyticsData(EMPTY_SNAPSHOT);
         setLoading(false);
-        return;
+        return EMPTY_SNAPSHOT;
       }
 
-      if (role !== 'super_admin' && !universityId) {
-        setSnapshot(EMPTY_SNAPSHOT);
+      if (!isSuperAdmin && !universityId) {
+        setAnalyticsData(EMPTY_SNAPSHOT);
         setLoading(false);
-        return;
+        return EMPTY_SNAPSHOT;
       }
 
-      if (withLoader) {
-        setLoading(true);
-      }
+      try {
+        if (withLoader) {
+          setLoading(true);
+        }
 
-      setError(null);
+        setError(null);
 
-      const baseEventsQuery = supabase
-        .from('events')
-        .select('id, university_id, name, status, start_date, end_date');
+        let eventsQuery = supabase
+          .from('events')
+          .select('id, university_id, name, status, start_date, end_date');
 
-      const baseMatchesQuery = supabase
-        .from('matches')
-        .select(`
-          id,
-          university_id,
-          status,
-          scheduled_at,
-          created_at,
-          winner_team_id,
-          team_a_id,
-          team_b_id,
-          team_a:teams!matches_team_a_id_fkey(id, name),
-          team_b:teams!matches_team_b_id_fkey(id, name)
-        `);
+        let matchesQuery = supabase
+          .from('matches')
+          .select(`
+            id,
+            university_id,
+            status,
+            scheduled_at,
+            created_at,
+            winner_team_id,
+            team_a_id,
+            team_b_id,
+            team_a:teams!matches_team_a_id_fkey(id, name),
+            team_b:teams!matches_team_b_id_fkey(id, name)
+          `)
+          .or('is_placeholder.is.null,is_placeholder.eq.false');
 
-      const baseRegistrationsQuery = supabase
-        .from('registrations')
-        .select(`
-          id,
-          university_id,
-          status,
-          created_at,
-          event_sport:event_sports(
-            sport_category:sports_categories(name)
-          )
-        `);
+        let registrationsQuery = supabase
+          .from('registrations')
+          .select(`
+            id,
+            university_id,
+            status,
+            created_at,
+            event_sport:event_sports(
+              sport_category:sports_categories(name)
+            )
+          `);
 
-      const baseBudgetsQuery = supabase
-        .from('budgets')
-        .select(`
-          id,
-          status,
-          estimated_amount,
-          actual_amount,
-          event:events!inner(id, name, university_id)
-        `);
+        let teamsQuery = supabase
+          .from('teams')
+          .select('id, university_id');
 
-      const eventsQuery =
-        role === 'super_admin' ? baseEventsQuery : baseEventsQuery.eq('university_id', universityId);
-      const matchesQuery =
-        role === 'super_admin' ? baseMatchesQuery : baseMatchesQuery.eq('university_id', universityId);
-      const registrationsQuery =
-        role === 'super_admin'
-          ? baseRegistrationsQuery
-          : baseRegistrationsQuery.eq('university_id', universityId);
-      const budgetsQuery =
-        role === 'super_admin'
-          ? baseBudgetsQuery
-          : baseBudgetsQuery.eq('event.university_id', universityId);
-      const universitiesQuery =
-        role === 'super_admin'
+        let budgetsQuery = supabase
+          .from('budgets')
+          .select(`
+            id,
+            status,
+            estimated_amount,
+            actual_amount,
+            event:events!inner(id, name, university_id)
+          `);
+
+        if (!isSuperAdmin) {
+          eventsQuery = eventsQuery.eq('university_id', universityId);
+          matchesQuery = matchesQuery.eq('university_id', universityId);
+          registrationsQuery = registrationsQuery.eq('university_id', universityId);
+          teamsQuery = teamsQuery.eq('university_id', universityId);
+          budgetsQuery = budgetsQuery.eq('event.university_id', universityId);
+        }
+
+        const universitiesQuery = isSuperAdmin
           ? supabase.from('universities').select('id, name, short_name').order('short_name')
           : Promise.resolve({ data: [], error: null });
 
-      const [eventsRes, matchesRes, registrationsRes, budgetsRes, universitiesRes] = await Promise.all([
-        eventsQuery,
-        matchesQuery,
-        registrationsQuery,
-        budgetsQuery,
-        universitiesQuery,
-      ]);
+        const [eventsRes, matchesRes, registrationsRes, teamsRes, budgetsRes, universitiesRes] = await Promise.all([
+          eventsQuery,
+          matchesQuery,
+          registrationsQuery,
+          teamsQuery,
+          budgetsQuery,
+          universitiesQuery,
+        ]);
 
-      const queryError =
-        eventsRes.error ||
-        matchesRes.error ||
-        registrationsRes.error ||
-        budgetsRes.error ||
-        universitiesRes.error;
+        const queryError =
+          eventsRes.error ||
+          matchesRes.error ||
+          registrationsRes.error ||
+          teamsRes.error ||
+          budgetsRes.error ||
+          universitiesRes.error;
 
-      if (queryError) {
-        setError(queryError.message);
-        setSnapshot(EMPTY_SNAPSHOT);
+        if (queryError) {
+          throw queryError;
+        }
+
+        const nextAnalyticsData: AnalyticsSnapshot = {
+          events: (eventsRes.data as EventRow[] | null) ?? [],
+          matches: (matchesRes.data as MatchRow[] | null) ?? [],
+          registrations: (registrationsRes.data as RegistrationRow[] | null) ?? [],
+          teams: (teamsRes.data as TeamRow[] | null) ?? [],
+          budgets: (budgetsRes.data as BudgetRow[] | null) ?? [],
+          universities: (universitiesRes.data as UniversityRow[] | null) ?? [],
+          refreshedAt: new Date().toISOString(),
+        };
+
+        setAnalyticsData(nextAnalyticsData);
+        return nextAnalyticsData;
+      } catch (err) {
+        console.error('Analytics Error:', err);
+        setError('Failed to load analytics');
+        setAnalyticsData((currentData) => currentData ?? EMPTY_SNAPSHOT);
+        throw err;
+      } finally {
         setLoading(false);
-        return;
       }
-
-      setSnapshot({
-        events: (eventsRes.data as EventRow[] | null) ?? [],
-        matches: (matchesRes.data as MatchRow[] | null) ?? [],
-        registrations: (registrationsRes.data as RegistrationRow[] | null) ?? [],
-        budgets: (budgetsRes.data as BudgetRow[] | null) ?? [],
-        universities: (universitiesRes.data as UniversityRow[] | null) ?? [],
-        refreshedAt: new Date().toISOString(),
-      });
-      setLoading(false);
     },
-    [canViewAnalytics, role, universityId],
+    [canViewAnalytics, isSuperAdmin, universityId],
   );
 
   useEffect(() => {
-    void fetchAnalytics(true);
+    console.log({
+      role,
+      universityId,
+      isSuperAdmin,
+    });
+  }, [isSuperAdmin, role, universityId]);
+
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      try {
+        await fetchAnalytics(true);
+      } catch (err) {
+        console.error('Analytics Error:', err);
+        setError('Failed to load analytics');
+      }
+    };
+
+    void loadAnalytics();
   }, [fetchAnalytics]);
 
   useEffect(() => {
@@ -293,16 +329,54 @@ export default function Analytics() {
     const channel = supabase
       .channel(`analytics-live-${role ?? 'unknown'}-${universityId ?? 'global'}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
-        void fetchAnalytics(false);
+        void (async () => {
+          try {
+            await fetchAnalytics(false);
+          } catch (err) {
+            console.error('Analytics Error:', err);
+            setError('Failed to load analytics');
+          }
+        })();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        void fetchAnalytics(false);
+        void (async () => {
+          try {
+            await fetchAnalytics(false);
+          } catch (err) {
+            console.error('Analytics Error:', err);
+            setError('Failed to load analytics');
+          }
+        })();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => {
-        void fetchAnalytics(false);
+        void (async () => {
+          try {
+            await fetchAnalytics(false);
+          } catch (err) {
+            console.error('Analytics Error:', err);
+            setError('Failed to load analytics');
+          }
+        })();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+        void (async () => {
+          try {
+            await fetchAnalytics(false);
+          } catch (err) {
+            console.error('Analytics Error:', err);
+            setError('Failed to load analytics');
+          }
+        })();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budgets' }, () => {
-        void fetchAnalytics(false);
+        void (async () => {
+          try {
+            await fetchAnalytics(false);
+          } catch (err) {
+            console.error('Analytics Error:', err);
+            setError('Failed to load analytics');
+          }
+        })();
       })
       .subscribe();
 
@@ -310,6 +384,8 @@ export default function Analytics() {
       supabase.removeChannel(channel);
     };
   }, [canViewAnalytics, fetchAnalytics, role, universityId]);
+
+  const snapshot = analyticsData ?? EMPTY_SNAPSHOT;
 
   const stats = useMemo(() => {
     const liveMatches = snapshot.matches.filter((match) => match.status === 'live').length;
@@ -320,19 +396,20 @@ export default function Analytics() {
     const approvedBudget = snapshot.budgets
       .filter((budget) => budget.status === 'approved')
       .reduce((sum, budget) => sum + (budget.estimated_amount || 0), 0);
-    const activeUniversities = new Set(
-      snapshot.events.map((event) => event.university_id).filter(Boolean),
+    const totalUniversities = new Set(
+      snapshot.matches.map((match) => match.university_id).filter(Boolean),
     ).size;
 
     return {
       totalEvents: snapshot.events.length,
       totalParticipants: snapshot.registrations.length,
       totalMatches: snapshot.matches.length,
+      totalTeams: snapshot.teams.length,
       liveMatches,
       completedMatches,
       totalBudget,
       approvedBudget,
-      activeUniversities,
+      totalUniversities,
       completionRate: snapshot.matches.length ? (completedMatches / snapshot.matches.length) * 100 : 0,
       budgetApprovalRate: totalBudget ? (approvedBudget / totalBudget) * 100 : 0,
     };
@@ -501,9 +578,13 @@ export default function Analytics() {
   }, [sportParticipation, stats, topTeams]);
 
   const scopeLabel =
-    role === 'super_admin'
+    isSuperAdmin
       ? 'Global analytics across all universities'
       : `${university?.short_name || 'University'} tenant scope`;
+
+  if (!isReady) {
+    return <div>Loading analytics...</div>;
+  }
 
   if (!canViewAnalytics) {
     return (
@@ -513,18 +594,21 @@ export default function Analytics() {
     );
   }
 
-  if (role !== 'super_admin' && !universityId) {
+  if (!universityId && !isSuperAdmin) {
     return (
       <DashboardLayout>
-        <div className="space-y-6 animate-fade-in">
-          <div className="overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 p-8 text-white shadow-xl">
-            <Badge className="mb-4 bg-white/10 text-white hover:bg-white/10">Setup required</Badge>
-            <h1 className="text-3xl font-display font-bold">Analytics will unlock after university setup</h1>
-            <p className="mt-3 max-w-2xl text-sm text-slate-200">
-              Your role is valid, but this account is not linked to a university yet, so tenant-scoped analytics
-              cannot load safely.
-            </p>
-          </div>
+        <div>No university assigned</div>
+      </DashboardLayout>
+    );
+  }
+
+  if (!analyticsData && !loading) {
+    return (
+      <DashboardLayout>
+        <div>
+          <h1>Analytics Dashboard</h1>
+          {error && <p>{error}</p>}
+          <p>No analytics data available</p>
         </div>
       </DashboardLayout>
     );
@@ -630,9 +714,9 @@ export default function Analytics() {
               />
               <StatsCard
                 title={role === 'super_admin' ? 'Active Universities' : 'Scope Health'}
-                value={role === 'super_admin' ? stats.activeUniversities : `${snapshot.events.length ? 'Healthy' : 'Starting'}`}
+                value={role === 'super_admin' ? stats.totalUniversities : stats.totalTeams}
                 icon={role === 'super_admin' ? Building2 : ShieldCheck}
-                description={role === 'super_admin' ? 'Universities with tracked events' : 'Queries are tenant scoped'}
+                description={role === 'super_admin' ? 'Universities represented in global match data' : 'Teams in your university scope'}
               />
             </div>
 

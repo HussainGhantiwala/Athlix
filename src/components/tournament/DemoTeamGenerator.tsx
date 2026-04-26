@@ -99,6 +99,7 @@ export default function DemoTeamGenerator({ event, onGenerated }: DemoTeamGenera
         name,
         event_sport_id: selectedSportId,
         status: 'approved' as const,
+        source: 'demo',
         created_by: user.id,
       }));
 

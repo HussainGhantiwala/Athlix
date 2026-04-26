@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -18,11 +18,14 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { format } from 'date-fns';
 import { getTenantScope } from '@/lib/tenant-scope';
+import { backfillApprovedRegistrations, resyncApprovedRegistrations } from '@/lib/registration-approval-service';
+import { toast } from 'sonner';
 
 interface DashboardStats {
   totalUniversities: number;
@@ -58,10 +61,47 @@ export default function AdminDashboard() {
   });
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [resyncing, setResyncing] = useState(false);
+  const backfillRan = useRef(false);
 
   useEffect(() => {
     fetchDashboardData();
   }, [isSuperAdmin, universityId]);
+
+  // One-time automatic backfill of approved registrations → teams
+  useEffect(() => {
+    if (backfillRan.current) return;
+    backfillRan.current = true;
+    backfillApprovedRegistrations().then(result => {
+      if (result.created > 0) {
+        console.log(`[backfill] Created ${result.created} teams, skipped ${result.skipped}`);
+      }
+      if (result.errors.length > 0) {
+        console.warn('[backfill] Errors:', result.errors);
+      }
+    }).catch(err => console.error('[backfill] Failed:', err));
+  }, []);
+
+  const handleResync = async () => {
+    setResyncing(true);
+    try {
+      const result = await resyncApprovedRegistrations();
+      if (result.created > 0) {
+        toast.success(`Synced ${result.created} new team(s) from registrations`);
+      } else {
+        toast.info('All registrations already synced — no new teams created');
+      }
+      if (result.errors.length > 0) {
+        toast.warning(`${result.errors.length} error(s) during sync`);
+        console.warn('[resync] Errors:', result.errors);
+      }
+      // Refresh dashboard stats
+      fetchDashboardData();
+    } catch (err: any) {
+      toast.error('Re-sync failed: ' + (err.message || 'Unknown error'));
+    }
+    setResyncing(false);
+  };
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -505,6 +545,22 @@ export default function AdminDashboard() {
                   </div>
                 </Link>
               )}
+              <button
+                type="button"
+                onClick={handleResync}
+                disabled={resyncing}
+                className="p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-3 text-left disabled:opacity-50"
+              >
+                <div className="w-10 h-10 rounded-lg bg-status-live/10 flex items-center justify-center">
+                  <RefreshCw className={`h-5 w-5 text-status-live ${resyncing ? 'animate-spin' : ''}`} />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Re-sync Registrations</p>
+                  <p className="text-xs text-muted-foreground">
+                    {resyncing ? 'Syncing...' : 'Sync approved → teams'}
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
         </div>

@@ -390,7 +390,7 @@ export default function Events() {
                     {isAdmin && (event.status === 'approved' || event.status === 'active') && (
                       <>
                         <DemoTeamGenerator event={event} onGenerated={fetchEvents} />
-                        <GenerateTeamsButton event={event} onGenerated={fetchEvents} />
+                        {/* <GenerateTeamsButton event={event} onGenerated={fetchEvents} /> */}
                         <MatchGenerator event={event} onGenerated={fetchEvents} />
                         <TournamentReset event={event} onReset={fetchEvents} />
                       </>

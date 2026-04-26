@@ -42,6 +42,7 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
   const [eventSports, setEventSports] = useState<any[]>([]);
   const [selectedSportId, setSelectedSportId] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [teamCount, setTeamCount] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [confirmWipe, setConfirmWipe] = useState(false);
 
@@ -68,11 +69,21 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
     }
   };
 
-  const handleProceedToType = () => {
+  const handleProceedToType = async () => {
     if (!selectedSportId || !scheduledAt) {
       toast.error('Please select a sport and schedule date');
       return;
     }
+
+    // Fetch team count for the modal
+    const { count } = await supabase
+      .from('teams')
+      .select('*', { count: 'exact', head: true })
+      .eq('event_sport_id', selectedSportId)
+      .in('status', ['approved', 'locked']);
+
+    setTeamCount(count || 0);
+
     setShowSportSelect(false);
     setShowTypeModal(true);
   };
@@ -202,6 +213,7 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
         onOpenChange={setShowTypeModal}
         onSelect={handleGenerate}
         loading={generating}
+        teamCount={teamCount}
       />
 
       {/* Confirm Wipe Dialog */}

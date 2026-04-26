@@ -116,6 +116,7 @@ export default function CoordinatorDashboard() {
           .from('matches')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'scheduled')
+          .or('is_placeholder.is.null,is_placeholder.eq.false')
           .in('event_sport_id', tenantScope.eventSportIds),
       ]);
 
@@ -183,6 +184,7 @@ export default function CoordinatorDashboard() {
         event_sport:event_sports(sport_category:sports_categories(name, icon))
       `)
       .eq('status', 'scheduled')
+      .or('is_placeholder.is.null,is_placeholder.eq.false')
       .in('event_sport_id', tenantScope.eventSportIds)
       .gte('scheduled_at', new Date().toISOString())
       .order('scheduled_at')

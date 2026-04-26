@@ -25,12 +25,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Download, Eye, ClipboardList, Users, User } from 'lucide-react';
+import { Download, Eye, ClipboardList, Users, User, CheckCircle, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import type { FormField } from './FormFieldBuilder';
+import { createTeamFromSubmission } from '@/lib/registration-approval-service';
 
 interface FormOption {
   id: string;
   type: string;
+  event_id: string;
+  sport_id: string;
   form_schema: FormField[];
   event?: { name: string } | null;
   sport?: { name: string; icon: string | null } | null;
@@ -48,12 +52,14 @@ interface Submission {
 }
 
 export default function SubmissionsViewer() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<FormOption[]>([]);
   const [selectedFormId, setSelectedFormId] = useState<string>('');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [detailSubmission, setDetailSubmission] = useState<Submission | null>(null);
+  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const basePath = role === 'admin' ? '/admin' : '/coordinator';
 
@@ -69,7 +75,7 @@ export default function SubmissionsViewer() {
     const { data } = await supabase
       .from('registration_forms')
       .select(`
-        id, type, form_schema,
+        id, type, form_schema, event_id, sport_id,
         event:events(name),
         sport:sports_categories(name, icon)
       `)
@@ -111,6 +117,27 @@ export default function SubmissionsViewer() {
 
   const selectedForm = forms.find(f => f.id === selectedFormId);
   const schema: FormField[] = Array.isArray(selectedForm?.form_schema) ? selectedForm.form_schema : [];
+
+  const handleApprove = async (sub: Submission) => {
+    if (!user?.id || !selectedForm) return;
+    setApprovingId(sub.id);
+    try {
+      const { teamId, error } = await createTeamFromSubmission(
+        sub,
+        { id: selectedForm.id, event_id: selectedForm.event_id, sport_id: selectedForm.sport_id, type: selectedForm.type },
+        user.id
+      );
+      if (error) {
+        toast.error('Approval failed: ' + error);
+      } else {
+        toast.success(`Team created (${sub.team_name || 'unnamed'})`);
+        setApprovedIds(prev => new Set([...prev, sub.id]));
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to approve');
+    }
+    setApprovingId(null);
+  };
 
   const exportCSV = () => {
     if (submissions.length === 0) return;
@@ -199,6 +226,7 @@ export default function SubmissionsViewer() {
                       <TableHead key={f.id}>{f.label || 'Untitled'}</TableHead>
                     ))}
                     <TableHead>Submitted</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -227,9 +255,32 @@ export default function SubmissionsViewer() {
                         {new Date(sub.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        <Button size="sm" variant="ghost" onClick={() => setDetailSubmission(sub)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                        {approvedIds.has(sub.id) ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-status-live">
+                            <CheckCircle className="h-3.5 w-3.5" /> Approved
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Pending</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setDetailSubmission(sub)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {!approvedIds.has(sub.id) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-status-live border-status-live/50 hover:bg-status-live/10"
+                              disabled={approvingId === sub.id}
+                              onClick={() => handleApprove(sub)}
+                            >
+                              <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                              {approvingId === sub.id ? 'Creating...' : 'Approve'}
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

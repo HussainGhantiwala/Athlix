@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Match } from '@/types/database';
 import { cn } from '@/lib/utils';
@@ -82,7 +82,7 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
         supabase
           .from('matches')
           .select(`
-            id, status, match_number, round, round_number, phase, group_name, match_phase, scheduled_at,
+            id, status, match_number, round, round_number, phase, group_name, match_phase, scheduled_at, is_bye_match,
             team_a_id, team_b_id, winner_id, winner_team_id, next_match_id,
             score_a, score_b, runs_a, runs_b, wickets_a, wickets_b, balls_a, balls_b, innings, target_score, result_status,
             team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
@@ -205,8 +205,10 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
       const existingMatches = roundMap.get(roundLabel) || [];
       const slots: VirtualSlot[] = [];
 
+      const sortedExisting = [...existingMatches].sort((a, b) => (a.match_number || 0) - (b.match_number || 0));
+
       for (let s = 0; s < currentMatchCount; s++) {
-        const existingMatch = existingMatches.find(m => m.match_number === s + 1);
+        const existingMatch = sortedExisting[s];
         let sourceA: VirtualSlot['sourceA'];
         let sourceB: VirtualSlot['sourceB'];
         if (r > 0) {
@@ -333,29 +335,31 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
               {virtualRounds.map((slots, roundIdx) => (
                 <motion.div
                   key={slots[0]?.roundLabel || roundIdx}
-                  className="flex flex-col gap-4"
+                  className="flex flex-col"
                   initial={{ opacity: 0, x: 30 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.4, delay: roundIdx * 0.1 }}
                 >
-                  <h3 className="text-sm font-semibold text-muted-foreground text-center px-2 pb-2 border-b border-border">
+                  <h3 className="text-sm font-semibold text-muted-foreground text-center px-2 pb-4 border-b border-border mb-2">
                     {slots[0]?.roundLabel ? formatRoundLabel(slots[0].roundLabel) : ''}
                   </h3>
-                  <div
-                    className="flex flex-col justify-around gap-4"
-                    style={{ minHeight: roundIdx > 0 ? `${Math.pow(2, roundIdx) * 80}px` : 'auto' }}
-                  >
+                  <div className="relative">
                     <AnimatePresence mode="popLayout">
                       {slots.map((slot) => {
-                        if (slot.match) {
+                        const isMatch = !!slot.match;
+                        const key = isMatch ? slot.match!.id : `placeholder-${roundIdx}-${slot.slotIndex}`;
+                        const cellHeight = 120 * Math.pow(2, roundIdx);
+
+                        if (isMatch) {
                           return (
-                            <BracketMatchCard
-                              key={slot.match.id}
-                              match={slot.match}
-                              isFinal={isFinalRound(roundIdx)}
-                              newlyAdvanced={newlyAdvanced}
-                              onClick={() => setSelectedMatch(slot.match!)}
-                            />
+                            <div key={key} className="flex flex-col justify-center px-4 relative" style={{ height: `${cellHeight}px` }}>
+                              <BracketMatchCard
+                                match={slot.match!}
+                                isFinal={isFinalRound(roundIdx)}
+                                newlyAdvanced={newlyAdvanced}
+                                onClick={() => setSelectedMatch(slot.match!)}
+                              />
+                            </div>
                           );
                         }
 
@@ -367,23 +371,24 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
                           : 'TBD';
 
                         return (
-                          <motion.div
-                            key={`placeholder-${roundIdx}-${slot.slotIndex}`}
-                            layout
-                            initial={{ opacity: 0, scale: 0.92 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                            className="w-56 rounded-lg border border-dashed border-border/50 overflow-hidden bg-card/50"
-                          >
-                            <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/30">
-                              <span className="text-xs text-muted-foreground/70 truncate italic">{sourceALabel}</span>
-                              <span className="text-sm text-muted-foreground">-</span>
-                            </div>
-                            <div className="flex items-center justify-between px-3 py-2.5">
-                              <span className="text-xs text-muted-foreground/70 truncate italic">{sourceBLabel}</span>
-                              <span className="text-sm text-muted-foreground">-</span>
-                            </div>
-                          </motion.div>
+                          <div key={key} className="flex flex-col justify-center px-4 relative" style={{ height: `${cellHeight}px` }}>
+                            <motion.div
+                              layout
+                              initial={{ opacity: 0, scale: 0.92 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                              className="w-56 rounded-lg border border-dashed border-border/50 overflow-hidden bg-card/50"
+                            >
+                              <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/30">
+                                <span className="text-xs text-muted-foreground/70 truncate italic">{sourceALabel}</span>
+                                <span className="text-sm text-muted-foreground">-</span>
+                              </div>
+                              <div className="flex items-center justify-between px-3 py-2.5">
+                                <span className="text-xs text-muted-foreground/70 truncate italic">{sourceBLabel}</span>
+                                <span className="text-sm text-muted-foreground">-</span>
+                              </div>
+                            </motion.div>
+                          </div>
                         );
                       })}
                     </AnimatePresence>
@@ -430,6 +435,20 @@ const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyA
   const winnerName = winnerId
     ? (winnerId === match.team_a_id ? match.team_a?.name : match.team_b?.name)
     : null;
+
+  if (match.is_bye_match) {
+    const advancingTeam = match.team_a || match.team_b;
+    return (
+      <div className="w-56 rounded-lg border border-accent/20 bg-accent/5 overflow-hidden flex flex-col justify-center shadow-sm h-[82px] opacity-80">
+        <div className="text-[10px] uppercase tracking-widest text-accent font-bold text-center pt-2">
+          Auto-Advanced
+        </div>
+        <div className="px-3 py-2 text-center text-sm font-semibold truncate text-foreground">
+          {advancingTeam?.name || 'TBD'}
+        </div>
+      </div>
+    );
+  }
 
   const tooltipContent = (
     <div className="space-y-1.5 text-xs max-w-[200px]">
