@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Match } from '@/types/database';
 import { cn } from '@/lib/utils';
-import { Loader2, Trophy, ZoomIn, ZoomOut, Maximize2, X, Calendar, Target } from 'lucide-react';
+import { Loader2, Trophy, ZoomIn, ZoomOut, Maximize2, Calendar, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -10,47 +10,69 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { format } from 'date-fns';
 import { measureWithTimeout, REQUEST_TIMEOUT_MS } from '@/lib/performance';
 
-interface BracketViewProps {
-  eventSportId: string;
-}
+/* -------------------------------------------------------------------------- */
+/*                                   Constants                                */
+/* -------------------------------------------------------------------------- */
+
+const MATCH_WIDTH = 220;
+const MATCH_HEIGHT = 80;
+const ROUND_SPACING = 100;
+const VERTICAL_SPACING = 40;
+const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5];
+
+/* -------------------------------------------------------------------------- */
+/*                                     Types                                  */
+/* -------------------------------------------------------------------------- */
 
 type BracketMatch = Omit<Match, 'team_a' | 'team_b'> & {
   team_a?: { id: string; name: string; university?: { short_name: string } };
   team_b?: { id: string; name: string; university?: { short_name: string } };
   event_sport?: { sport_category?: { name?: string; icon?: string } };
+  // Fallbacks for direct engine preview without DB
+  isByeMatch?: boolean;
+  teamA?: { id: string; name: string };
+  teamB?: { id: string; name: string };
+  winner?: { id: string; name: string };
 };
 
-interface VirtualSlot {
-  roundLabel: string;
-  slotIndex: number;
-  match?: BracketMatch;
-  sourceA?: { round: string; matchNumber: number };
-  sourceB?: { round: string; matchNumber: number };
+interface PositionedMatch {
+  match: BracketMatch;
+  x: number;
+  y: number;
+  roundIndex: number;
+  matchIndexInRound: number;
 }
 
-function getRoundLabelByMatchCount(count: number): string {
-  if (count === 1) return 'final';
-  if (count === 2) return 'semifinal';
-  if (count === 4) return 'quarterfinal';
-  return 'round_of_16';
+interface Connector {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  type: 'straight' | 'elbow';
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                   Helpers                                  */
+/* -------------------------------------------------------------------------- */
 
 function formatRoundLabel(round: string) {
-  if (round === 'round_of_16') return 'Round of 16';
-  if (round === 'quarterfinal') return 'Quarterfinal';
-  if (round === 'semifinal') return 'Semifinal';
-  if (round === 'final') return 'Final';
+  const r = round.toLowerCase();
+  if (r === 'round_of_16') return 'Round of 16';
+  if (r === 'quarterfinal' || r === 'quarter_final') return 'Quarter-Finals';
+  if (r === 'semifinal' || r === 'semi_final' || r === 'semi') return 'Semi-Finals';
+  if (r === 'final') return 'Grand Final';
   return round;
 }
 
-const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5];
+/* -------------------------------------------------------------------------- */
+/*                               Main Component                               */
+/* -------------------------------------------------------------------------- */
 
-export default function BracketView({ eventSportId }: BracketViewProps) {
+export default function BracketView({ eventSportId }: { eventSportId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [matches, setMatches] = useState<BracketMatch[]>([]);
-  const prevWinnersRef = useRef<Set<string>>(new Set());
-  const [newlyAdvanced, setNewlyAdvanced] = useState<Set<string>>(new Set());
   const [selectedMatch, setSelectedMatch] = useState<BracketMatch | null>(null);
 
   // Zoom & Pan state
@@ -90,71 +112,189 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
             event_sport:event_sports!matches_event_sport_id_fkey(sport_category:sports_categories(name, icon))
           `)
           .eq('event_sport_id', eventSportId)
-          .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final', 'Quarter Final', 'Semi Final', 'Final'])
-          .order('match_number')
-          .limit(32),
+          .in('round', ['round_of_16', 'quarterfinal', 'semifinal', 'final', 'Quarter Final', 'Semi Final', 'Final', 'semi', 'semi_final'])
+          .order('round_number', { ascending: true })
+          .order('match_number', { ascending: true }),
         REQUEST_TIMEOUT_MS
       );
 
-      if (fetchError) {
-        throw fetchError;
-      }
-
-      const casted = (data as unknown as BracketMatch[]) || [];
-      setMatches(casted);
-
-      const currentWinners = new Set<string>();
-      casted.forEach((match) => {
-        const winnerId = (match as any).winner_id || match.winner_team_id;
-        if (winnerId) currentWinners.add(`${match.id}-${winnerId}`);
-      });
-
-      const fresh = new Set<string>();
-      currentWinners.forEach((key) => {
-        if (!prevWinnersRef.current.has(key)) {
-          fresh.add(key);
-        }
-      });
-
-      if (fresh.size > 0) {
-        setNewlyAdvanced(fresh);
-        window.setTimeout(() => setNewlyAdvanced(new Set()), 2500);
-      }
-
-      prevWinnersRef.current = currentWinners;
-    } catch (fetchError: any) {
-      console.error('Failed to load bracket:', fetchError);
-      setError(fetchError.message || 'Unable to load the bracket.');
-      setMatches([]);
+      if (fetchError) throw fetchError;
+      setMatches((data as unknown as BracketMatch[]) || []);
+    } catch (err: any) {
+      console.error('Failed to load bracket:', err);
+      setError(err.message || 'Unable to load the bracket.');
     } finally {
       setLoading(false);
     }
   };
 
+  // Positioning Engine
+  const { positionedMatches, connectors, rounds, totalWidth, totalHeight } = useMemo(() => {
+    if (matches.length === 0) return { positionedMatches: [], connectors: [], rounds: [], totalWidth: 0, totalHeight: 0 };
+
+    const roundGroups = new Map<number, BracketMatch[]>();
+    matches.forEach(m => {
+      const rn = m.round_number || 1;
+      if (!roundGroups.has(rn)) roundGroups.set(rn, []);
+      roundGroups.get(rn)!.push(m);
+    });
+
+    const sortedRoundNums = Array.from(roundGroups.keys()).sort((a, b) => a - b);
+    const positioned: PositionedMatch[] = [];
+    const idToPositioned = new Map<string, PositionedMatch>();
+    const roundLabels: string[] = [];
+
+    const baseSpacing = MATCH_HEIGHT + VERTICAL_SPACING;
+
+    sortedRoundNums.forEach((roundNum, r) => {
+      const roundMatches = roundGroups.get(roundNum) || [];
+      
+      // Do NOT reorder matches randomly. We keep their existing deterministic array order 
+      // from the backend to ensure higher seeds are not misplaced.
+      
+      roundLabels.push(roundMatches[0]?.round || `Round ${r + 1}`);
+
+      // Dynamic spacing: baseSpacing * (2 ^ roundIndex)
+      const currentSpacing = baseSpacing * Math.pow(2, r);
+      // Offset ensures that disconnected/root matches perfectly align with standard bracket geometry
+      const startOffset = (currentSpacing - baseSpacing) / 2;
+
+      roundMatches.forEach((m, i) => {
+        // Find sources (parent matches from the previous round)
+        const sources = positioned.filter(p => p.match.next_match_id === m.id);
+        
+        let y: number;
+
+        if (sources.length > 0) {
+           // Vertically center this match perfectly relative to its actual parent matches
+           const sumY = sources.reduce((sum, src) => sum + src.y, 0);
+           y = sumY / sources.length;
+        } else {
+           // Round 1 matches (or disconnected trees) rely strictly on dynamic geometric spacing
+           // BYE matches take up a full index slot (i), refusing to collapse spacing.
+           y = startOffset + (i * currentSpacing);
+        }
+
+        const pm: PositionedMatch = {
+          match: m,
+          x: r * (MATCH_WIDTH + ROUND_SPACING),
+          y,
+          roundIndex: r,
+          matchIndexInRound: i
+        };
+        positioned.push(pm);
+        idToPositioned.set(m.id, pm);
+      });
+    });
+
+    // Generate Connectors
+    const conns: Connector[] = [];
+    positioned.forEach(pm => {
+      if (pm.match.next_match_id) {
+        const nextPm = idToPositioned.get(pm.match.next_match_id);
+        if (nextPm) {
+          const startX = pm.x + MATCH_WIDTH;
+          const startY = pm.y + MATCH_HEIGHT / 2;
+          const endX = nextPm.x;
+          const endY = nextPm.y + MATCH_HEIGHT / 2;
+          const midX = startX + (endX - startX) / 2;
+
+          conns.push({
+            id: `c-${pm.match.id}`,
+            x1: startX,
+            y1: startY,
+            x2: endX,
+            y2: endY,
+            type: 'elbow'
+          });
+        }
+      }
+    });
+
+    const maxRound = sortedRoundNums.length;
+    const totalWidthOut = maxRound * MATCH_WIDTH + (maxRound - 1) * ROUND_SPACING;
+
+    // Calculate dynamic bounding box
+    let minY = 0;
+    let maxY = 0;
+    if (positioned.length > 0) {
+      minY = Math.min(...positioned.map(p => p.y));
+      maxY = Math.max(...positioned.map(p => p.y));
+    }
+    const calculatedTotalHeight = (maxY - minY) + MATCH_HEIGHT + 100;
+    
+    // Apply global Y offset to bring the entire bracket down by 50px
+    const offsetY = -minY + 50; 
+
+    positioned.forEach(p => {
+      p.y += offsetY;
+    });
+
+    conns.forEach(c => {
+      c.y1 += offsetY;
+      c.y2 += offsetY;
+    });
+
+    return {
+      positionedMatches: positioned,
+      connectors: conns,
+      rounds: roundLabels,
+      totalWidth: totalWidthOut,
+      totalHeight: calculatedTotalHeight
+    };
+  }, [matches]);
+
+  const centeredPan = useMemo(() => {
+    if (!containerRef.current) return { x: 0, y: 0 };
+
+    const containerWidth = containerRef.current.clientWidth;
+    const containerHeight = containerRef.current.clientHeight;
+
+    return {
+      x: (containerWidth - totalWidth * zoom) / 2,
+      y: (containerHeight - totalHeight * zoom) / 2,
+    };
+  }, [zoom, totalWidth, totalHeight]);
+
+  const fitScale = useMemo(() => {
+    if (!containerRef.current || totalWidth === 0 || totalHeight === 0) return 1;
+
+    const containerWidth = containerRef.current.clientWidth;
+    const containerHeight = containerRef.current.clientHeight;
+
+    const scaleX = containerWidth / (totalWidth + 100);
+    const scaleY = containerHeight / (totalHeight + 100);
+
+    return Math.min(scaleX, scaleY, 1);
+  }, [totalWidth, totalHeight]);
+
+  useEffect(() => {
+    if (fitScale) {
+      setZoom(fitScale);
+    }
+  }, [fitScale]);
+
+  // Find Champion
+  const champion = useMemo(() => {
+    const finalMatch = matches.find(m => m.round?.toLowerCase() === 'final');
+    if (!finalMatch || finalMatch.status !== 'completed') return null;
+    const winnerId = finalMatch.winner_id || finalMatch.winner_team_id;
+    if (!winnerId) return null;
+    return winnerId === finalMatch.team_a_id ? finalMatch.team_a?.name : finalMatch.team_b?.name;
+  }, [matches]);
+
   // Zoom handlers
-  const handleZoomIn = useCallback(() => {
-    setZoom(z => {
-      const idx = ZOOM_LEVELS.indexOf(z);
-      return idx < ZOOM_LEVELS.length - 1 ? ZOOM_LEVELS[idx + 1] : z;
-    });
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setZoom(z => {
-      const idx = ZOOM_LEVELS.indexOf(z);
-      return idx > 0 ? ZOOM_LEVELS[idx - 1] : z;
-    });
-  }, []);
-
+  const handleZoomIn = useCallback(() => setZoom(z => ZOOM_LEVELS[Math.min(ZOOM_LEVELS.indexOf(z) + 1, ZOOM_LEVELS.length - 1)]), []);
+  const handleZoomOut = useCallback(() => setZoom(z => ZOOM_LEVELS[Math.max(ZOOM_LEVELS.indexOf(z) - 1, 0)]), []);
   const handleResetView = useCallback(() => {
-    setZoom(1);
+    setZoom(fitScale);
     setPan({ x: 0, y: 0 });
-  }, []);
-
+  }, [fitScale]);
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.deltaY < 0) handleZoomIn();
-    else handleZoomOut();
+    if (e.ctrlKey) {
+      e.preventDefault();
+      if (e.deltaY < 0) handleZoomIn(); else handleZoomOut();
+    }
   }, [handleZoomIn, handleZoomOut]);
 
   // Pan handlers
@@ -174,101 +314,9 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
 
   const handleMouseUp = useCallback(() => setIsPanning(false), []);
 
-  // Build virtual bracket
-  const virtualRounds = useMemo(() => {
-    if (matches.length === 0) return [];
-
-    const roundMap = new Map<string, BracketMatch[]>();
-    matches.forEach(m => {
-      const round = m.round || 'Round 1';
-      if (!roundMap.has(round)) roundMap.set(round, []);
-      roundMap.get(round)!.push(m);
-    });
-
-    let round1Label = '';
-    let round1Count = 0;
-    for (const [label, ms] of roundMap) {
-      if (ms.length > round1Count) {
-        round1Count = ms.length;
-        round1Label = label;
-      }
-    }
-
-    if (round1Count === 0) return [];
-
-    const totalRounds = Math.ceil(Math.log2(round1Count)) + 1;
-    const rounds: VirtualSlot[][] = [];
-
-    let currentMatchCount = round1Count;
-    for (let r = 0; r < totalRounds; r++) {
-      const roundLabel = r === 0 ? round1Label : getRoundLabelByMatchCount(currentMatchCount);
-      const existingMatches = roundMap.get(roundLabel) || [];
-      const slots: VirtualSlot[] = [];
-
-      const sortedExisting = [...existingMatches].sort((a, b) => (a.match_number || 0) - (b.match_number || 0));
-
-      for (let s = 0; s < currentMatchCount; s++) {
-        const existingMatch = sortedExisting[s];
-        let sourceA: VirtualSlot['sourceA'];
-        let sourceB: VirtualSlot['sourceB'];
-        if (r > 0) {
-          const prevRoundLabel = r === 1 ? round1Label : getRoundLabelByMatchCount(currentMatchCount * 2);
-          sourceA = { round: prevRoundLabel, matchNumber: s * 2 + 1 };
-          sourceB = { round: prevRoundLabel, matchNumber: s * 2 + 2 };
-        }
-
-        slots.push({ roundLabel, slotIndex: s, match: existingMatch, sourceA, sourceB });
-      }
-
-      rounds.push(slots);
-      currentMatchCount = Math.max(1, Math.floor(currentMatchCount / 2));
-      if (currentMatchCount === 0) break;
-    }
-
-    return rounds;
-  }, [matches]);
-
-  // Find champion
-  const champion = useMemo(() => {
-    if (virtualRounds.length === 0) return null;
-    const finalSlots = virtualRounds[virtualRounds.length - 1];
-    const finalMatch = finalSlots?.[0]?.match;
-    const winnerId = (finalMatch as any)?.winner_id || finalMatch?.winner_team_id;
-    if (!winnerId) return null;
-    const isFinished = finalMatch.status === 'completed';
-    if (!isFinished) return null;
-    return winnerId === finalMatch.team_a_id
-      ? finalMatch.team_a?.name
-      : finalMatch.team_b?.name;
-  }, [virtualRounds]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-accent" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="text-center py-12">
-        <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-        <p className="text-muted-foreground">{error}</p>
-      </div>
-    );
-  }
-
-  if (virtualRounds.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-        <p className="text-muted-foreground">No knockout bracket available</p>
-      </div>
-    );
-  }
-
-  const isFinalRound = (idx: number) => idx === virtualRounds.length - 1;
+  if (loading) return <div className="flex items-center justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-accent" /></div>;
+  if (error) return <div className="text-center py-12"><Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" /><p className="text-muted-foreground">{error}</p></div>;
+  if (matches.length === 0) return <div className="text-center py-12"><Trophy className="h-12 w-12 text-muted-foreground mx-auto mb-4" /><p className="text-muted-foreground">No knockout bracket available</p></div>;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -279,45 +327,41 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
             <motion.div
               initial={{ opacity: 0, y: -20, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-              className="text-center py-4 px-6 rounded-xl border-2 border-accent bg-accent/10 shadow-[0_0_30px_hsl(var(--accent)/0.3)]"
+              className="text-center py-4 px-6 rounded-xl border-2 border-accent bg-accent/10 shadow-[0_0_30px_hsl(var(--accent)/0.3)] mb-6"
             >
-              <motion.div
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
-                className="text-3xl mb-1"
-              >
-                ðŸ†
-              </motion.div>
+              <Trophy className="h-8 w-8 text-accent mx-auto mb-2" />
               <p className="text-xs font-semibold text-accent uppercase tracking-wider">Tournament Champion</p>
-              <p className="text-xl font-display font-bold text-accent">{champion}</p>
+              <p className="text-2xl font-display font-bold text-accent">{champion}</p>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Zoom Controls */}
-        <div className="flex items-center justify-between">
+        {/* Controls */}
+        <div className="flex items-center justify-between bg-card/50 p-2 rounded-lg border border-border/50">
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleZoomOut} disabled={zoom === ZOOM_LEVELS[0]}>
-              <ZoomOut className="h-4 w-4" />
-            </Button>
-            <span className="text-xs font-medium text-muted-foreground w-12 text-center">{Math.round(zoom * 100)}%</span>
-            <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleZoomIn} disabled={zoom === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}>
-              <ZoomIn className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="h-8 w-8 ml-1" onClick={handleResetView}>
-              <Maximize2 className="h-4 w-4" />
-            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomOut} disabled={zoom === ZOOM_LEVELS[0]}><ZoomOut className="h-4 w-4" /></Button>
+            <span className="text-xs font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomIn} disabled={zoom === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}><ZoomIn className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8 ml-1" onClick={handleResetView}><Maximize2 className="h-4 w-4" /></Button>
           </div>
-          <p className="text-xs text-muted-foreground">Scroll to zoom Â· Drag to pan</p>
+          <div className="flex items-center gap-4">
+            {rounds.map((r, i) => (
+              <div key={i} className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 px-2">
+                {formatRoundLabel(r)}
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground hidden sm:block">Ctrl + Scroll to Zoom Â· Drag to Pan</p>
         </div>
 
-        {/* Bracket Container with Zoom/Pan */}
+        {/* Viewport */}
         <div
           ref={containerRef}
-          className={cn('overflow-hidden rounded-lg border bg-muted/20 relative', isPanning ? 'cursor-grabbing' : 'cursor-grab')}
-          style={{ minHeight: 300 }}
+          className={cn(
+            'overflow-hidden rounded-xl border bg-muted/10 relative shadow-inner',
+            isPanning ? 'cursor-grabbing' : 'cursor-grab'
+          )}
+          style={{ height: '70vh', minHeight: '500px' }}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -325,294 +369,189 @@ export default function BracketView({ eventSportId }: BracketViewProps) {
           onMouseLeave={handleMouseUp}
         >
           <div
-            className="p-6 transition-transform duration-150 ease-out"
+            className="absolute transition-transform duration-75 ease-out"
             style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transformOrigin: 'top left',
+              transform: `
+  translate(${pan.x + centeredPan.x}px, ${pan.y + centeredPan.y}px)
+  scale(${zoom})
+`,
+              transformOrigin: '0 0',
+              width: totalWidth + 100,
+              height: totalHeight + 100,
             }}
           >
-            <div className="flex gap-6 min-w-max items-start">
-              {virtualRounds.map((slots, roundIdx) => (
-                <motion.div
-                  key={slots[0]?.roundLabel || roundIdx}
-                  className="flex flex-col"
-                  initial={{ opacity: 0, x: 30 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.4, delay: roundIdx * 0.1 }}
-                >
-                  <h3 className="text-sm font-semibold text-muted-foreground text-center px-2 pb-4 border-b border-border mb-2">
-                    {slots[0]?.roundLabel ? formatRoundLabel(slots[0].roundLabel) : ''}
-                  </h3>
-                  <div className="relative">
-                    <AnimatePresence mode="popLayout">
-                      {slots.map((slot) => {
-                        const isMatch = !!slot.match;
-                        const key = isMatch ? slot.match!.id : `placeholder-${roundIdx}-${slot.slotIndex}`;
-                        const cellHeight = 120 * Math.pow(2, roundIdx);
+            {/* SVG Connectors Layer */}
+            <svg
+              className="absolute top-0 left-0 pointer-events-none"
+              width={totalWidth + 100}
+              height={totalHeight + 100}
+              style={{ overflow: 'visible' }}
+            >
+              <defs>
+                <linearGradient id="line-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="hsl(var(--accent) / 0.2)" />
+                  <stop offset="100%" stopColor="hsl(var(--accent) / 0.5)" />
+                </linearGradient>
+              </defs>
+              {connectors.map(conn => {
+                const midX = conn.x1 + (conn.x2 - conn.x1) / 2;
+                // Draw a nice elbow line: ──┐ ├── ──┘
+                // Actually it's more like: ──┐
+                //                            ├─
+                //                          ──┘
+                const path = `M ${conn.x1} ${conn.y1} L ${midX} ${conn.y1} L ${midX} ${conn.y2} L ${conn.x2} ${conn.y2}`;
 
-                        if (isMatch) {
-                          return (
-                            <div key={key} className="flex flex-col justify-center px-4 relative" style={{ height: `${cellHeight}px` }}>
-                              <BracketMatchCard
-                                match={slot.match!}
-                                isFinal={isFinalRound(roundIdx)}
-                                newlyAdvanced={newlyAdvanced}
-                                onClick={() => setSelectedMatch(slot.match!)}
-                              />
-                            </div>
-                          );
-                        }
+                return (
+                  <motion.path
+                    key={conn.id}
+                    d={path}
+                    fill="none"
+                    stroke="url(#line-grad)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    initial={{ pathLength: 0, opacity: 0 }}
+                    animate={{ pathLength: 1, opacity: 1 }}
+                    transition={{ duration: 1, delay: 0.5 }}
+                  />
+                );
+              })}
+            </svg>
 
-                        const sourceALabel = slot.sourceA
-                          ? `Winner of ${slot.sourceA.round} #${slot.sourceA.matchNumber}`
-                          : 'TBD';
-                        const sourceBLabel = slot.sourceB
-                          ? `Winner of ${slot.sourceB.round} #${slot.sourceB.matchNumber}`
-                          : 'TBD';
-
-                        return (
-                          <div key={key} className="flex flex-col justify-center px-4 relative" style={{ height: `${cellHeight}px` }}>
-                            <motion.div
-                              layout
-                              initial={{ opacity: 0, scale: 0.92 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                              className="w-56 rounded-lg border border-dashed border-border/50 overflow-hidden bg-card/50"
-                            >
-                              <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/30">
-                                <span className="text-xs text-muted-foreground/70 truncate italic">{sourceALabel}</span>
-                                <span className="text-sm text-muted-foreground">-</span>
-                              </div>
-                              <div className="flex items-center justify-between px-3 py-2.5">
-                                <span className="text-xs text-muted-foreground/70 truncate italic">{sourceBLabel}</span>
-                                <span className="text-sm text-muted-foreground">-</span>
-                              </div>
-                            </motion.div>
-                          </div>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            {/* Matches Layer */}
+            {positionedMatches.map((pm) => (
+              <div
+                key={pm.match.id}
+                className="absolute"
+                style={{
+                  left: pm.x,
+                  top: pm.y,
+                  width: MATCH_WIDTH,
+                  height: MATCH_HEIGHT,
+                }}
+              >
+                <BracketMatchCard
+                  match={pm.match}
+                  onClick={() => setSelectedMatch(pm.match)}
+                />
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Match Detail Modal */}
         <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />
       </div>
     </TooltipProvider>
   );
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Bracket Match Card with Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* -------------------------------------------------------------------------- */
+/*                               Match Card                                   */
+/* -------------------------------------------------------------------------- */
 
-const BracketMatchCard = memo(function BracketMatchCard({ match, isFinal, newlyAdvanced, onClick }: {
+const BracketMatchCard = memo(function BracketMatchCard({ match, onClick }: {
   match: BracketMatch;
-  isFinal: boolean;
-  newlyAdvanced: Set<string>;
   onClick: () => void;
 }) {
   const isLive = match.status === 'live';
   const isFinalized = match.status === 'completed';
-  const winnerId = (match as any).winner_id || match.winner_team_id;
-  const winnerA = winnerId === match.team_a_id;
-  const winnerB = winnerId === match.team_b_id;
-  const isNewWinnerA = newlyAdvanced.has(`${match.id}-${match.team_a_id}`);
-  const isNewWinnerB = newlyAdvanced.has(`${match.id}-${match.team_b_id}`);
-  const isChampion = isFinal && isFinalized && winnerId;
-  const loserA = isFinalized && !winnerA && winnerId;
-  const loserB = isFinalized && !winnerB && winnerId;
+  const winnerId = match.winner_id || match.winner_team_id || match.winner?.id;
 
   const sportName = (match.event_sport?.sport_category?.name || '').toLowerCase();
   const isCricket = sportName.includes('cricket');
   const scoreA = isCricket ? (match.runs_a ?? null) : (match.score_a ?? null);
   const scoreB = isCricket ? (match.runs_b ?? null) : (match.score_b ?? null);
-  const wicketsA = match.wickets_a ?? 0;
-  const wicketsB = match.wickets_b ?? 0;
 
-  const winnerName = winnerId
-    ? (winnerId === match.team_a_id ? match.team_a?.name : match.team_b?.name)
-    : null;
+  const isBye = match.is_bye_match || match.isByeMatch;
+  const teamA = match.team_a || match.teamA;
+  const teamB = match.team_b || match.teamB;
 
-  if (match.is_bye_match) {
-    const advancingTeam = match.team_a || match.team_b;
+  if (isBye) {
+    const advancingTeam = teamA || teamB;
     return (
-      <div className="w-56 rounded-lg border border-accent/20 bg-accent/5 overflow-hidden flex flex-col justify-center shadow-sm h-[82px] opacity-80">
-        <div className="text-[10px] uppercase tracking-widest text-accent font-bold text-center pt-2">
-          Auto-Advanced
-        </div>
-        <div className="px-3 py-2 text-center text-sm font-semibold truncate text-foreground">
-          {advancingTeam?.name || 'TBD'}
-        </div>
+      <div className="w-full h-full rounded-lg border border-accent/20 bg-accent/5 flex flex-col items-center justify-center opacity-60">
+        <span className="text-[9px] uppercase font-bold text-accent tracking-tighter">BYE - Auto Advance</span>
+        <span className="text-sm font-bold truncate px-2 w-full text-center">{advancingTeam?.name || 'TBD'}</span>
       </div>
     );
   }
-
-  const tooltipContent = (
-    <div className="space-y-1.5 text-xs max-w-[200px]">
-      <p className="font-semibold">{match.round || 'Match'}</p>
-      <div className="flex justify-between gap-3">
-        <span className={cn(winnerA && 'font-bold')}>{match.team_a?.name || 'TBD'}</span>
-        <span className="font-mono">{isCricket ? `${scoreA ?? 0}/${wicketsA}` : (scoreA ?? '-')}</span>
-      </div>
-      <div className="flex justify-between gap-3">
-        <span className={cn(winnerB && 'font-bold')}>{match.team_b?.name || 'TBD'}</span>
-        <span className="font-mono">{isCricket ? `${scoreB ?? 0}/${wicketsB}` : (scoreB ?? '-')}</span>
-      </div>
-      {match.match_phase && match.match_phase !== 'not_started' && (
-        <p className="text-muted-foreground capitalize">{match.match_phase.replace(/_/g, ' ')}</p>
-      )}
-      {winnerName && <p className="text-accent font-semibold">ðŸ† {winnerName}</p>}
-      {isLive && <p className="text-status-live font-semibold">ðŸ”´ LIVE</p>}
-      <p className="text-muted-foreground">{format(new Date(match.scheduled_at), 'MMM d, yyyy h:mm a')}</p>
-    </div>
-  );
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <motion.div
-          key={match.id}
-          layout
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-          onClick={(e) => { e.stopPropagation(); onClick(); }}
+          whileHover={{ y: -2, scale: 1.02 }}
+          onClick={onClick}
           className={cn(
-            'w-56 rounded-lg border overflow-hidden bg-card transition-all duration-500 cursor-pointer hover:shadow-md hover:border-accent/50',
-            isLive && 'border-status-live border-2 shadow-lg',
-            isFinalized && !isChampion && 'border-accent/30',
-            isChampion && 'border-accent border-2 shadow-[0_0_20px_hsl(var(--accent)/0.4)]',
-            (isNewWinnerA || isNewWinnerB) && 'shadow-[0_0_24px_hsl(var(--accent)/0.5)]'
+            'w-full h-full rounded-lg border bg-card shadow-sm flex flex-col overflow-hidden transition-all cursor-pointer select-none',
+            isLive ? 'border-status-live ring-2 ring-status-live/20' : 'border-border/60',
+            isFinalized && 'border-accent/40 bg-accent/[0.02]'
           )}
         >
-          {/* Champion banner */}
-          <AnimatePresence>
-            {isChampion && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                className="bg-accent/15 text-accent text-xs text-center py-1.5 font-bold flex items-center justify-center gap-1"
-              >
-                <Trophy className="h-3 w-3" /> CHAMPION
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Team A */}
+          <div className={cn(
+            'flex-1 flex items-center justify-between px-3 border-b border-border/40',
+            winnerId === (match.team_a_id || teamA?.id) && 'bg-accent/5'
+          )}>
+            <div className="flex items-center gap-2 min-w-0">
+              {winnerId === (match.team_a_id || teamA?.id) && <Trophy className="h-3 w-3 text-accent shrink-0" />}
+              <span className={cn(
+                'text-xs truncate transition-colors',
+                winnerId === (match.team_a_id || teamA?.id) ? 'font-bold text-foreground' : 'text-muted-foreground',
+                !(match.team_a_id || teamA?.id) && 'italic opacity-50'
+              )}>
+                {teamA?.name || 'TBD'}
+              </span>
+            </div>
+            <span className={cn('text-xs font-mono font-bold', winnerId === (match.team_a_id || teamA?.id) ? 'text-accent' : 'text-muted-foreground')}>
+              {scoreA !== null ? scoreA : '-'}
+            </span>
+          </div>
 
-          <TeamRow
-            name={match.team_a?.name || 'TBD'}
-            score={scoreA}
-            scoreDetail={isCricket ? `/${wicketsA}` : undefined}
-            isWinner={winnerA}
-            isLoser={!!loserA}
-            isNewWinner={isNewWinnerA}
-            hasBorder
-          />
-          <TeamRow
-            name={match.team_b?.name || 'TBD'}
-            score={scoreB}
-            scoreDetail={isCricket ? `/${wicketsB}` : undefined}
-            isWinner={winnerB}
-            isLoser={!!loserB}
-            isNewWinner={isNewWinnerB}
-            hasBorder={false}
-          />
+          {/* Team B */}
+          <div className={cn(
+            'flex-1 flex items-center justify-between px-3',
+            winnerId === (match.team_b_id || teamB?.id) && 'bg-accent/5'
+          )}>
+            <div className="flex items-center gap-2 min-w-0">
+              {winnerId === (match.team_b_id || teamB?.id) && <Trophy className="h-3 w-3 text-accent shrink-0" />}
+              <span className={cn(
+                'text-xs truncate transition-colors',
+                winnerId === (match.team_b_id || teamB?.id) ? 'font-bold text-foreground' : 'text-muted-foreground',
+                !(match.team_b_id || teamB?.id) && 'italic opacity-50'
+              )}>
+                {teamB?.name || 'TBD'}
+              </span>
+            </div>
+            <span className={cn('text-xs font-mono font-bold', winnerId === (match.team_b_id || teamB?.id) ? 'text-accent' : 'text-muted-foreground')}>
+              {scoreB !== null ? scoreB : '-'}
+            </span>
+          </div>
 
           {isLive && (
-            <motion.div
-              animate={{ opacity: [0.7, 1, 0.7] }}
-              transition={{ repeat: Infinity, duration: 1.5 }}
-              className="bg-status-live/10 text-status-live text-xs text-center py-1 font-semibold"
-            >
-              ðŸ”´ LIVE
-            </motion.div>
+            <div className="h-1 w-full bg-status-live animate-pulse" />
           )}
         </motion.div>
       </TooltipTrigger>
-      <TooltipContent side="right" className="p-3">
-        {tooltipContent}
+      <TooltipContent>
+        <div className="p-1 space-y-1">
+          <p className="text-[10px] font-bold text-muted-foreground uppercase">{match.round}</p>
+          <p className="text-xs">{format(new Date(match.scheduled_at || new Date()), 'MMM d, HH:mm')}</p>
+        </div>
       </TooltipContent>
     </Tooltip>
   );
 });
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Team Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-function TeamRow({ name, score, scoreDetail, isWinner, isLoser, isNewWinner, hasBorder }: {
-  name: string;
-  score: number | null;
-  scoreDetail?: string;
-  isWinner: boolean;
-  isLoser: boolean;
-  isNewWinner: boolean;
-  hasBorder: boolean;
-}) {
-  return (
-    <motion.div
-      animate={isNewWinner ? {
-        backgroundColor: ['hsl(var(--accent) / 0)', 'hsl(var(--accent) / 0.25)', 'hsl(var(--accent) / 0.1)'],
-      } : {}}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
-      className={cn(
-        'flex items-center justify-between px-3 py-2 transition-opacity duration-500',
-        hasBorder && 'border-b border-border',
-        isWinner && !isNewWinner && 'bg-accent/10',
-        isLoser && 'opacity-50'
-      )}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <AnimatePresence>
-          {isWinner && (
-            <motion.div
-              initial={{ scale: 0, rotate: -90 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 15 }}
-            >
-              <Trophy className="h-3 w-3 text-accent shrink-0" />
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <motion.span
-          layout
-          className={cn('text-sm truncate', isWinner ? 'font-bold' : 'font-medium')}
-        >
-          {name}
-        </motion.span>
-      </div>
-      <motion.span
-        key={`${score}`}
-        initial={{ scale: 1.3, color: 'hsl(var(--accent))' }}
-        animate={{ scale: 1, color: isWinner ? 'hsl(var(--accent))' : 'hsl(var(--foreground))' }}
-        transition={{ duration: 0.3 }}
-        className="text-sm font-bold"
-      >
-        {score !== null ? `${score}${scoreDetail || ''}` : '-'}
-      </motion.span>
-    </motion.div>
-  );
-}
-
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Match Detail Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* -------------------------------------------------------------------------- */
+/*                               Detail Modal                                 */
+/* -------------------------------------------------------------------------- */
 
 function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onClose: () => void }) {
   if (!match) return null;
-
-  const sportName = (match.event_sport?.sport_category?.name || '').toLowerCase();
-  const isCricket = sportName.includes('cricket');
-  const scoreA = isCricket ? (match.runs_a ?? 0) : (match.score_a ?? 0);
-  const scoreB = isCricket ? (match.runs_b ?? 0) : (match.score_b ?? 0);
-  const wicketsA = match.wickets_a ?? 0;
-  const wicketsB = match.wickets_b ?? 0;
-  const ballsA = match.balls_a ?? 0;
-  const ballsB = match.balls_b ?? 0;
-  const winnerId = (match as any).winner_id || match.winner_team_id;
-  const winnerA = winnerId === match.team_a_id;
-  const winnerB = winnerId === match.team_b_id;
-  const winnerName = winnerId
-    ? (winnerA ? match.team_a?.name : match.team_b?.name)
-    : null;
+  const winnerId = match.winner_id || match.winner_team_id || match.winner?.id;
+  const teamA = match.team_a || match.teamA;
+  const teamB = match.team_b || match.teamB;
 
   return (
     <Dialog open={!!match} onOpenChange={() => onClose()}>
@@ -620,86 +559,38 @@ function MatchDetailModal({ match, onClose }: { match: BracketMatch | null; onCl
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span>{match.event_sport?.sport_category?.icon}</span>
-            <span>{match.round || 'Match'}</span>
+            <span>{match.round || 'Match Detail'}</span>
           </DialogTitle>
         </DialogHeader>
-
-        <div className="space-y-4">
-          {/* Scoreboard */}
-          <div className="bg-muted/30 rounded-lg p-4">
-            {isCricket ? (
-              <div className="space-y-3">
-                <div className={cn('flex justify-between items-center', winnerA && 'text-accent font-bold')}>
-                  <div>
-                    <p className="font-semibold">{winnerA && 'ðŸ† '}{match.team_a?.name || 'TBD'}</p>
-                    <p className="text-xs text-muted-foreground">{match.team_a?.university?.short_name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xl font-display font-bold">{scoreA}/{wicketsA}</p>
-                    <p className="text-xs text-muted-foreground">{Math.floor(ballsA / 6)}.{ballsA % 6} overs</p>
-                  </div>
-                </div>
-                <div className="border-t border-border" />
-                <div className={cn('flex justify-between items-center', winnerB && 'text-accent font-bold')}>
-                  <div>
-                    <p className="font-semibold">{winnerB && 'ðŸ† '}{match.team_b?.name || 'TBD'}</p>
-                    <p className="text-xs text-muted-foreground">{match.team_b?.university?.short_name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xl font-display font-bold">{scoreB}/{wicketsB}</p>
-                    <p className="text-xs text-muted-foreground">{Math.floor(ballsB / 6)}.{ballsB % 6} overs</p>
-                  </div>
-                </div>
-                {match.target_score && (
-                  <div className="text-center text-xs font-medium text-accent p-2 rounded bg-accent/10">
-                    Target: {match.target_score}
-                  </div>
-                )}
+        <div className="space-y-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-center flex-1 space-y-2">
+              <div className="h-16 w-16 bg-muted rounded-full mx-auto flex items-center justify-center text-xl font-bold">
+                {teamA?.name?.[0] || '?'}
               </div>
-            ) : (
-              <div className="flex items-center justify-between">
-                <div className={cn('text-center flex-1', winnerA && 'text-accent')}>
-                  <p className={cn('font-semibold', winnerA && 'font-bold')}>{winnerA && 'ðŸ† '}{match.team_a?.name || 'TBD'}</p>
-                  <p className="text-xs text-muted-foreground">{match.team_a?.university?.short_name}</p>
-                </div>
-                <div className="px-4 flex items-center gap-3">
-                  <span className={cn('text-3xl font-display font-bold', winnerA && 'text-accent')}>{scoreA}</span>
-                  <span className="text-xl text-muted-foreground">-</span>
-                  <span className={cn('text-3xl font-display font-bold', winnerB && 'text-accent')}>{scoreB}</span>
-                </div>
-                <div className={cn('text-center flex-1', winnerB && 'text-accent')}>
-                  <p className={cn('font-semibold', winnerB && 'font-bold')}>{winnerB && 'ðŸ† '}{match.team_b?.name || 'TBD'}</p>
-                  <p className="text-xs text-muted-foreground">{match.team_b?.university?.short_name}</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Match Info */}
-          <div className="space-y-2 text-sm">
-            {winnerName && (
-              <div className="flex items-center gap-2 text-accent font-semibold">
-                <Trophy className="h-4 w-4" />
-                Winner: {winnerName}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" />
-                {format(new Date(match.scheduled_at), 'MMM d, yyyy')}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Target className="h-3.5 w-3.5" />
-                {match.status}
-              </div>
+              <p className={cn('font-bold', winnerId === (match.team_a_id || teamA?.id) && 'text-accent')}>{teamA?.name || 'TBD'}</p>
             </div>
-
-            {match.match_phase && match.match_phase !== 'not_started' && (
-              <p className="text-xs text-muted-foreground capitalize">Phase: {match.match_phase.replace(/_/g, ' ')}</p>
-            )}
-
+            <div className="text-2xl font-display font-black text-muted-foreground italic">VS</div>
+            <div className="text-center flex-1 space-y-2">
+              <div className="h-16 w-16 bg-muted rounded-full mx-auto flex items-center justify-center text-xl font-bold">
+                {teamB?.name?.[0] || '?'}
+              </div>
+              <p className={cn('font-bold', winnerId === (match.team_b_id || teamB?.id) && 'text-accent')}>{teamB?.name || 'TBD'}</p>
+            </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-4 text-sm bg-muted/30 p-4 rounded-xl">
+            <div className="space-y-1">
+              <p className="text-muted-foreground flex items-center gap-2"><Calendar className="h-3 w-3" /> Date</p>
+              <p className="font-semibold">{format(new Date(match.scheduled_at || new Date()), 'PPP')}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-muted-foreground flex items-center gap-2"><Target className="h-3 w-3" /> Status</p>
+              <p className="font-semibold capitalize">{match.status || 'Scheduled'}</p>
+            </div>
+          </div>
+
+          <Button className="w-full" variant="outline" onClick={onClose}>Close Bracket</Button>
         </div>
       </DialogContent>
     </Dialog>

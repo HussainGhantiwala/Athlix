@@ -162,6 +162,10 @@ export interface Team {
   updated_at: string;
   source?: 'registered' | 'demo' | 'manual' | 'imported';
   registration_submission_id?: string;
+  seed_position?: number | null;
+  is_previous_winner?: boolean;
+  is_previous_runner_up?: boolean;
+  is_previous_second_runner_up?: boolean;
   university?: University;
   members?: TeamMember[];
   players?: TeamPlayer[];
