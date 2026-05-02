@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -232,6 +232,16 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
       return;
     }
     const result = Array.isArray(data) ? data[0] : data;
+    
+    if (result && result.out_match_phase !== 'completed') {
+      // Sync score_a and score_b for live public scoreboard components
+      await supabase.from('matches').update({
+        score_a: result.out_runs_a ?? 0,
+        score_b: result.out_runs_b ?? 0,
+        status: 'live'
+      } as any).eq('id', match.id);
+    }
+
     if (result?.out_match_phase === 'completed') {
       if (!completionNotifiedRef.current) {
         completionNotifiedRef.current = true;
@@ -458,7 +468,7 @@ export default function SportScoreDialog({ open, onOpenChange, match, userId, on
 
         {tossWinnerId && sportType === 'cricket' && (
           <div className="text-center text-xs text-muted-foreground p-2 rounded bg-muted/30 border border-border">
-            ðŸª™ {tossWinnerId === match.team_a_id ? teamAName : teamBName} won toss â€” chose to <span className="capitalize font-medium">{match.toss_decision}</span> first
+            👉 {tossWinnerId === match.team_a_id ? teamAName : teamBName} won toss – chose to <span className="capitalize font-medium">{match.toss_decision}</span> first
           </div>
         )}
 

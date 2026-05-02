@@ -312,7 +312,7 @@ export default function ScoreControlPanel() {
         <div className="mb-4">
           {tossWinnerName && (
             <p className="text-center text-xs text-muted-foreground mb-2">
-              ðŸª™ {tossWinnerName} won toss â€” <span className="capitalize">{tossDecision}</span> first
+              👉 {tossWinnerName} won toss – <span className="capitalize">{tossDecision}</span> first
             </p>
           )}
           {target && innings === 2 && (

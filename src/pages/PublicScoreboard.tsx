@@ -76,7 +76,8 @@ export default function PublicScoreboard() {
       toss_decision,
       team_a:teams!matches_team_a_id_fkey(id, name, university:universities(short_name)),
       team_b:teams!matches_team_b_id_fkey(id, name, university:universities(short_name)),
-      venue:venues(name)
+      venue:venues(name),
+      event_sport:event_sports!matches_event_sport_id_fkey(sport_category:sports_categories(name))
     `;
 
     const [{ data: live, error: liveError }, { data: completed, error: completedError }] = await Promise.all([
@@ -141,19 +142,45 @@ export default function PublicScoreboard() {
           }
 
           if (nextMatch?.id) {
+            let needsRefetch = false;
+
             setLiveMatches((current) => {
+              const existingMatch = current.find((match) => match.id === nextMatch.id);
+              if (!existingMatch && nextMatch.status === 'live') {
+                needsRefetch = true;
+                return current;
+              }
               const withoutCurrent = current.filter((match) => match.id !== nextMatch.id);
-              return nextMatch.status === 'live' ? [nextMatch, ...withoutCurrent].slice(0, 10) : withoutCurrent;
+              if (existingMatch) {
+                const mergedMatch = { ...existingMatch, ...nextMatch };
+                return mergedMatch.status === 'live' ? [mergedMatch, ...withoutCurrent].slice(0, 10) : withoutCurrent;
+              }
+              return current;
             });
 
             setCompletedMatches((current) => {
+              const existingMatch = current.find((match) => match.id === nextMatch.id);
+              if (!existingMatch && nextMatch.status === 'completed') {
+                needsRefetch = true;
+                return current;
+              }
               const withoutCurrent = current.filter((match) => match.id !== nextMatch.id);
-              return nextMatch.status === 'completed' ? [nextMatch, ...withoutCurrent].slice(0, 10) : withoutCurrent;
+              if (existingMatch) {
+                const mergedMatch = { ...existingMatch, ...nextMatch };
+                return mergedMatch.status === 'completed' ? [mergedMatch, ...withoutCurrent].slice(0, 10) : withoutCurrent;
+              }
+              return current;
             });
-          }
 
-          // Keep list consistent for status transitions and joined relational fields.
-          void fetchMatches(selectedUniversity);
+            if (needsRefetch) {
+              if ((window as any)._scoreboardRefetchTimer) {
+                clearTimeout((window as any)._scoreboardRefetchTimer);
+              }
+              (window as any)._scoreboardRefetchTimer = setTimeout(() => {
+                void fetchMatches(selectedUniversity);
+              }, 800);
+            }
+          }
         }
       )
       .subscribe();
@@ -198,6 +225,8 @@ export default function PublicScoreboard() {
 
   const MatchCard = ({ match }: { match: Match }) => {
     const isLive = match.status === 'live';
+    const sportName = ((match as any).event_sport?.sport_category?.name || '').toLowerCase();
+    const isCricket = sportName.includes('cricket');
 
     return (
       <div
@@ -230,18 +259,34 @@ export default function PublicScoreboard() {
               {match.team_a?.name || 'TBD'}
             </p>
             <p className="text-xs text-muted-foreground">{match.team_a?.university?.short_name}</p>
+            {isCricket && (
+              <div className="mt-2">
+                <p className="text-3xl font-display font-bold text-foreground">
+                  {match.runs_a ?? 0}/{match.wickets_a ?? 0}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {Math.floor((match.balls_a ?? 0) / 6)}.{(match.balls_a ?? 0) % 6} ov
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="px-4">
-            <div className="flex items-center gap-3">
-              <span className={cn('text-3xl font-display font-bold', (match.score_a || 0) > (match.score_b || 0) && 'text-accent')}>
-                {match.score_a ?? 0}
-              </span>
-              <span className="text-xl text-muted-foreground">-</span>
-              <span className={cn('text-3xl font-display font-bold', (match.score_b || 0) > (match.score_a || 0) && 'text-accent')}>
-                {match.score_b ?? 0}
-              </span>
-            </div>
+            {!isCricket ? (
+              <div className="flex items-center gap-3">
+                <span className={cn('text-3xl font-display font-bold', (match.score_a || 0) > (match.score_b || 0) && 'text-accent')}>
+                  {match.score_a ?? 0}
+                </span>
+                <span className="text-xl text-muted-foreground">-</span>
+                <span className={cn('text-3xl font-display font-bold', (match.score_b || 0) > (match.score_a || 0) && 'text-accent')}>
+                  {match.score_b ?? 0}
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center">
+                <span className="text-xl text-muted-foreground">VS</span>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 text-center">
@@ -249,6 +294,16 @@ export default function PublicScoreboard() {
               {match.team_b?.name || 'TBD'}
             </p>
             <p className="text-xs text-muted-foreground">{match.team_b?.university?.short_name}</p>
+            {isCricket && (
+              <div className="mt-2">
+                <p className="text-3xl font-display font-bold text-foreground">
+                  {match.runs_b ?? 0}/{match.wickets_b ?? 0}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {Math.floor((match.balls_b ?? 0) / 6)}.{(match.balls_b ?? 0) % 6} ov
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

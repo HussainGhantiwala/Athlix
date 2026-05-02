@@ -23,7 +23,16 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
     fetchBracket();
     const channel = supabase
       .channel(`bracket-simple-${eventSportId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `event_sport_id=eq.${eventSportId}` }, () => fetchBracket())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `event_sport_id=eq.${eventSportId}` }, (payload) => {
+        if (payload.eventType === 'UPDATE') {
+          const updatedMatch = payload.new as Match;
+          setMatches((current) =>
+            current.map((m) => (m.id === updatedMatch.id ? { ...m, ...updatedMatch } : m))
+          );
+        } else {
+          void fetchBracket();
+        }
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [eventSportId]);
@@ -168,14 +177,26 @@ export function TournamentBracket({ eventSportId, highlightMatchId }: Tournament
 
 const MatchNode = memo(({ match, isHighlighted }: { match: Match; isHighlighted: boolean }) => {
   const winnerId = match.winner_id || match.winner_team_id;
+  const sportName = (match.event_sport as any)?.sport_category?.name?.toLowerCase() || '';
+  const isCricket = sportName.includes('cricket');
+
+  const formatScore = (runs: number | null | undefined, wickets: number | null | undefined, balls: number | null | undefined, score: number | null | undefined) => {
+    if (isCricket) {
+      if (runs == null) return '-';
+      const overs = balls ? `${Math.floor(balls / 6)}.${balls % 6}` : '0.0';
+      return `${runs}/${wickets ?? 0} (${overs} ov)`;
+    }
+    return score !== null && score !== undefined ? score : '-';
+  };
+
   return (
     <div className={cn(
       "bg-card border rounded-md overflow-hidden flex flex-col h-full shadow-sm transition-all",
       isHighlighted ? "border-accent ring-1 ring-accent" : "border-border/60"
     )}>
       {[
-        { team: match.team_a, id: match.team_a_id, score: match.score_a },
-        { team: match.team_b, id: match.team_b_id, score: match.score_b }
+        { team: match.team_a, id: match.team_a_id, scoreDisplay: formatScore(match.runs_a, match.wickets_a, match.balls_a, match.score_a) },
+        { team: match.team_b, id: match.team_b_id, scoreDisplay: formatScore(match.runs_b, match.wickets_b, match.balls_b, match.score_b) }
       ].map((t, i) => (
         <div key={i} className={cn(
           "flex-1 flex items-center justify-between px-2 text-[10px]",
@@ -188,7 +209,7 @@ const MatchNode = memo(({ match, isHighlighted }: { match: Match; isHighlighted:
               {t.team?.name || 'TBD'}
             </span>
           </div>
-          <span className="font-mono font-bold">{t.score ?? '-'}</span>
+          <span className="font-mono font-bold whitespace-nowrap ml-1">{t.scoreDisplay}</span>
         </div>
       ))}
     </div>
