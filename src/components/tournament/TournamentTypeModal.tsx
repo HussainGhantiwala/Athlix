@@ -15,7 +15,7 @@ import { Trophy, Users, BarChart3 } from 'lucide-react';
 interface TournamentTypeModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (type: TournamentType) => void;
+  onSelect: (type: TournamentType, seeding?: 'none' | 'previous' | 'manual') => void;
   loading?: boolean;
   teamCount?: number;
 }
@@ -43,6 +43,7 @@ const types: { value: TournamentType; label: string; description: string; icon: 
 
 export default function TournamentTypeModal({ open, onOpenChange, onSelect, loading, teamCount = 0 }: TournamentTypeModalProps) {
   const [selected, setSelected] = useState<TournamentType | null>(null);
+  const [seedingType, setSeedingType] = useState<'none' | 'previous' | 'manual'>('none');
 
   // Power of 2 logic for Knockout
   const getBracketSize = (n: number) => {
@@ -109,22 +110,43 @@ export default function TournamentTypeModal({ open, onOpenChange, onSelect, load
               </div>
               
               <div className="border-t pt-4 grid grid-cols-2 gap-3">
-                <label className="flex flex-row items-center space-x-2 cursor-pointer touch-none">
-                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground focus:ring-accent" checked readOnly/>
+                <label className="flex flex-row items-center space-x-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent" 
+                    checked={seedingType === 'none'} 
+                    onChange={() => setSeedingType('none')}
+                  />
                   <span className="font-medium">Random Draw</span>
                 </label>
-                <label className="flex flex-row items-center space-x-2 cursor-pointer touch-none">
-                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground focus:ring-accent" checked readOnly/>
-                  <span className="font-medium">Balanced BYEs</span>
+                <label className="flex flex-row items-center space-x-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent" 
+                    checked={seedingType === 'previous'} 
+                    onChange={() => setSeedingType('previous')}
+                  />
+                  <span className="font-medium flex flex-col">
+                    Previous Year Seeding
+                    <span className="text-[10px] text-muted-foreground">Winners get top seeds</span>
+                  </span>
                 </label>
-                <label className="flex flex-row items-center space-x-2 opacity-50 cursor-not-allowed">
-                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground rounded-sm" disabled />
-                  <span className="font-medium flex flex-col">Seed Top Teams <span className="text-[10px] text-muted-foreground">Coming Soon</span></span>
+                <label className="flex flex-row items-center space-x-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent" 
+                    checked={seedingType === 'manual'} 
+                    onChange={() => setSeedingType('manual')}
+                  />
+                  <span className="font-medium flex flex-col">
+                    Manual Seeding
+                    <span className="text-[10px] text-muted-foreground">Admin provides seeds</span>
+                  </span>
                 </label>
-                <label className="flex flex-row items-center space-x-2 opacity-50 cursor-not-allowed">
-                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground rounded-sm" disabled />
-                  <span className="font-medium flex flex-col">Manual Seeding <span className="text-[10px] text-muted-foreground">Coming Soon</span></span>
-                </label>
+                <div className="flex flex-row items-center space-x-2 opacity-50">
+                  <input type="checkbox" className="h-4 w-4 bg-muted border-muted-foreground rounded-sm" checked readOnly />
+                  <span className="font-medium flex flex-col">Balanced BYEs <span className="text-[10px] text-muted-foreground">Always active</span></span>
+                </div>
               </div>
             </div>
           )}
@@ -133,7 +155,7 @@ export default function TournamentTypeModal({ open, onOpenChange, onSelect, load
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             disabled={!selected || loading}
-            onClick={() => selected && onSelect(selected)}
+            onClick={() => selected && onSelect(selected, seedingType)}
           >
             {loading ? 'Generating...' : 'Generate Matches'}
           </Button>

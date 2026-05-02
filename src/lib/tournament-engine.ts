@@ -1,17 +1,16 @@
 import { supabase } from '@/integrations/supabase/client';
 import { Team } from '@/types/database';
+import {
+  generateKnockoutBracket,
+  fetchPreviousYearSeeding,
+  nextPowerOf2
+} from './knockout-engine';
 
 function requireUniversityId(universityId: string | null | undefined): string {
   if (!universityId) {
     throw new Error('Cannot create matches: university_id is missing from your profile.');
   }
   return universityId;
-}
-
-function nextPowerOf2(n: number): number {
-  let p = 1;
-  while (p < n) p *= 2;
-  return p;
 }
 
 /** Fisher-Yates (Knuth) shuffle - unbiased. */
@@ -104,151 +103,127 @@ interface GenerateResult {
 }
 
 // KNOCKOUT - Pre-creates ALL rounds with next_match_id links.
-// Helper to generate a standard seeding array recursively for nice BYE distribution
-function getStandardSeedOrder(bracketSize: number): number[] {
-  let order = [1, 2];
-  while (order.length < bracketSize) {
-    const nextSize = order.length * 2;
-    const nextOrder: number[] = [];
-    for (const seed of order) {
-      nextOrder.push(seed, nextSize + 1 - seed);
-    }
-    order = nextOrder;
-  }
-  return order;
-}
-
-// KNOCKOUT - Pre-creates ALL rounds with next_match_id links.
-// Uses standard seeding distribution so BYEs are mathematically balanced.
+// Follows strict seeding and structural rules.
 export async function generateKnockoutMatches(
   eventSportId: string,
   eventId: string,
   teams: Team[],
   userId: string,
   universityId: string,
-  scheduledAt: string
+  scheduledAt: string,
+  seedingType: 'none' | 'previous' | 'manual' = 'none',
+  manualSeeding?: Record<string, number>
 ): Promise<GenerateResult> {
   if (teams.length < 2) {
     return { success: false, error: 'Need at least 2 teams for knockout.' };
   }
+
   const tenantUniversityId = requireUniversityId(universityId);
-  const bracketSize = nextPowerOf2(teams.length);
-  const totalRounds = Math.log2(bracketSize);
-  
-  // 1. Shuffle teams randomly for a fair draw
-  const shuffled = shuffle(teams);
-  
-  // 2. Map seeds to teams. (Seeds > shuffled.length will be BYEs)
-  const teamSeedMap = new Map<number, Team | null>();
-  const seedOrder = getStandardSeedOrder(bracketSize);
-  
-  for (let i = 1; i <= bracketSize; i++) {
-    if (i <= shuffled.length) {
-      teamSeedMap.set(i, shuffled[i - 1]);
-    } else {
-      teamSeedMap.set(i, null);
+
+  try {
+    let seeding: Record<string, number> = {};
+
+    if (seedingType === 'previous') {
+      seeding = await fetchPreviousYearSeeding(eventSportId, tenantUniversityId);
+    } else if (seedingType === 'manual' && manualSeeding) {
+      seeding = manualSeeding;
     }
-  }
 
-  // 3. Build the structure of round slots
-  const rounds: string[][] = [];
-  for (let r = 0; r < totalRounds; r += 1) {
-    const matchesInRound = bracketSize / Math.pow(2, r + 1);
-    const ids: string[] = [];
-    for (let m = 0; m < matchesInRound; m += 1) {
-      ids.push(crypto.randomUUID());
-    }
-    rounds.push(ids);
-  }
+    const bracket = generateKnockoutBracket(teams, seeding);
+    const matchInserts: any[] = [];
+    const byeMatchesList: any[] = [];
 
-  // 4. Link next_match_ids
-  const nextMatchLookup = new Map<string, string>();
-  for (let r = 0; r < rounds.length - 1; r += 1) {
-    for (let m = 0; m < rounds[r].length; m += 1) {
-      nextMatchLookup.set(rounds[r][m], rounds[r + 1][Math.floor(m / 2)]);
-    }
-  }
+    for (const round of bracket.rounds) {
+      for (const match of round.matches) {
+        const isByeMatch = match.isByeMatch;
+        const winnerId = match.winner?.id || null;
 
-  // 5. Match array construction
-  const matchInserts: any[] = [];
-  let matchNumber = 1;
-  const byeMatchesList: any[] = []; // To auto-complete later
+        const matchObj = {
+          id: match.id,
+          event_sport_id: eventSportId,
+          event_id: eventId,
+          university_id: tenantUniversityId,
+          sport_id: teams[0]?.sport_id || null,
+          team_a_id: match.teamA?.id || null,
+          team_b_id: match.teamB?.id || null,
+          scheduled_at: scheduledAt,
+          round: match.roundName.toLowerCase().replace(/\s+/g, '_'),
+          round_number: match.roundNumber,
+          is_bye_match: isByeMatch,
+          is_placeholder: match.roundNumber > 1,
+          phase: match.roundNumber > 1 ? 'not_started' : MATCH_PHASE_NOT_STARTED,
+          status: isByeMatch ? 'completed' : 'scheduled',
+          result_status: isByeMatch ? 'final' : 'pending',
+          match_phase: isByeMatch ? 'completed' : MATCH_PHASE_NOT_STARTED,
+          next_match_id: match.nextMatchId,
+          created_by: userId,
+          winner_id: winnerId,
+          winner_team_id: winnerId,
+          completed_at: isByeMatch ? new Date().toISOString() : null,
+        };
 
-  for (let r = 0; r < rounds.length; r += 1) {
-    const matchesInRound = rounds[r].length;
-    const roundLabel = getKnockoutRoundByMatchCount(matchesInRound);
-    
-    for (let m = 0; m < matchesInRound; m += 1) {
-      const id = rounds[r][m];
-      const nextMatchId = nextMatchLookup.get(id) ?? null;
-      
-      let teamA: Team | null = null;
-      let teamB: Team | null = null;
-      let isByeMatch = false;
-
-      // Assign slots only for Round 1
-      if (r === 0) {
-        // Pairs are adjacent in the seedOrder array
-        const seedA = seedOrder[m * 2];
-        const seedB = seedOrder[m * 2 + 1];
-        teamA = teamSeedMap.get(seedA) || null;
-        teamB = teamSeedMap.get(seedB) || null;
-        
-        // If one is missing, it's a BYE
-        if (!teamA || !teamB) {
-          isByeMatch = true;
+        matchInserts.push(matchObj);
+        if (isByeMatch) {
+          byeMatchesList.push(matchObj);
         }
       }
+    }
 
-      const matchObj = {
-        id,
-        event_sport_id: eventSportId,
-        event_id: eventId,
-        university_id: tenantUniversityId,
-        sport_id: teamA?.sport_id ?? teamB?.sport_id ?? null,
-        team_a_id: teamA?.id || null,
-        team_b_id: teamB?.id || null,
-        scheduled_at: scheduledAt,
-        round: roundLabel,
-        round_number: r + 1,
-        match_number: matchNumber,
-        is_bye_match: isByeMatch,
-        is_placeholder: r > 0,
-        phase: r > 0 ? 'not_started' : MATCH_PHASE_NOT_STARTED,
-        status: isByeMatch ? 'completed' : 'scheduled',
-        result_status: isByeMatch ? 'final' : 'pending',
-        match_phase: isByeMatch ? 'completed' : MATCH_PHASE_NOT_STARTED,
-        next_match_id: nextMatchId,
-        created_by: userId,
-      };
+    // Phase 1: Insert all matches WITHOUT next_match_id to avoid FK constraint violations
+    const phase1Inserts = matchInserts.map(m => {
+      const { next_match_id, ...rest } = m;
+      return rest;
+    });
 
-      if (isByeMatch) {
-         // Auto-advance the winner
-         const winnerId = teamA?.id || teamB?.id || null;
-         (matchObj as any).winner_team_id = winnerId;
-         (matchObj as any).winner_id = winnerId;
-         (matchObj as any).completed_at = new Date().toISOString();
-         byeMatchesList.push(matchObj);
+    const { data: insertedMatches, error: insertError } = await supabase
+      .from('matches')
+      .insert(phase1Inserts)
+      .select('id');
+
+    if (insertError) {
+      return { success: false, error: insertError.message };
+    }
+
+    if (!insertedMatches || insertedMatches.length !== phase1Inserts.length) {
+      const count = insertedMatches?.length || 0;
+      console.error(`Partial insert failure: Expected ${phase1Inserts.length} matches, but inserted ${count}.`);
+      return { success: false, error: 'Bracket generation failed: Partial database insertion.' };
+    }
+
+    const insertedIds = new Set(insertedMatches.map(m => m.id));
+
+    // Phase 2: Update all matches with their correct next_match_id securely
+    for (const match of matchInserts) {
+      if (match.next_match_id) {
+        if (!insertedIds.has(match.next_match_id)) {
+          console.warn(`Missing reference: Match ${match.id} cannot link to missing next_match_id ${match.next_match_id}`);
+          continue; // Prevent FK violation
+        }
+
+        const { error: updateError } = await supabase
+          .from('matches')
+          .update({ next_match_id: match.next_match_id } as any)
+          .eq('id', match.id);
+
+        if (updateError) {
+          console.error(`Failed to set next_match_id for ${match.id}:`, updateError.message);
+        }
       }
-
-      matchInserts.push(matchObj);
-      matchNumber += 1;
     }
-  }
 
-  // Execute insert
-  const { error } = await supabase.from('matches').insert(matchInserts);
-  if (error) return { success: false, error: error.message };
-
-  // Run the placing logic sequentially for byes
-  for (const byeMatch of byeMatchesList) {
-    if (byeMatch.next_match_id && byeMatch.winner_id) {
-      await placeWinnerInNextMatch(byeMatch.next_match_id, byeMatch.winner_id);
+    // Run the placing logic sequentially for byes
+    for (const byeMatch of byeMatchesList) {
+      if (byeMatch.next_match_id && byeMatch.winner_id) {
+        await placeWinnerInNextMatch(byeMatch.next_match_id, byeMatch.winner_id);
+      }
     }
-  }
 
-  return { success: true, matchCount: matchInserts.length };
+    return { success: true, matchCount: matchInserts.length };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
 }
+
 
 // ADVANCE WINNER - Called after a knockout match completes.
 // Reads the match next_match_id and places the winner into the next match slot.
@@ -517,5 +492,5 @@ export async function generateKnockoutFromGroupStage(
   if (!qualifiedTeams || qualifiedTeams.length < 2) {
     return { success: false, error: 'Not enough qualified teams.' };
   }
-  return generateKnockoutMatches(eventSportId, eventId, qualifiedTeams as any[], userId, universityId, scheduledAt);
+  return generateKnockoutMatches(eventSportId, eventId, qualifiedTeams as any[], userId, universityId, scheduledAt, 'none');
 }

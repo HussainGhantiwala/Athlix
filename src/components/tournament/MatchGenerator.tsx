@@ -88,7 +88,7 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
     setShowTypeModal(true);
   };
 
-  const handleGenerate = async (type: TournamentType) => {
+  const handleGenerate = async (type: TournamentType, seeding?: 'none' | 'previous' | 'manual') => {
     if (!user?.id || !profile?.university_id) {
       toast.error('Your account is missing university context.');
       return;
@@ -141,7 +141,15 @@ export default function MatchGenerator({ event, onGenerated }: MatchGeneratorPro
       let result;
       switch (type) {
         case 'knockout':
-          result = await generateKnockoutMatches(selectedSportId, event.id, teams as Team[], user.id, actorUniversityId, scheduledAt);
+          result = await generateKnockoutMatches(
+            selectedSportId, 
+            event.id, 
+            teams as Team[], 
+            user.id, 
+            actorUniversityId, 
+            scheduledAt,
+            seeding
+          );
           break;
         case 'group':
           result = await generateGroupMatches(selectedSportId, event.id, teams as Team[], user.id, actorUniversityId, scheduledAt);

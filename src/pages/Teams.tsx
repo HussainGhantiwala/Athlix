@@ -146,6 +146,46 @@ export default function Teams() {
     }
   };
 
+  const handleSetSeed = async (team: Team, position: number | null) => {
+    try {
+      // 1. If we are setting a position (not clearing), clear it from any other team in the same sport
+      if (position !== null) {
+        await supabase
+          .from('teams')
+          .update({
+            seed_position: null,
+            is_previous_winner: false,
+            is_previous_runner_up: false,
+            is_previous_second_runner_up: false,
+          })
+          .eq('event_sport_id', team.event_sport_id)
+          .eq('seed_position', position);
+      }
+
+      // 2. Update the target team
+      const isWinner = position === 1;
+      const isRunnerUp = position === 2;
+      const isThird = position === 3;
+
+      const { error } = await supabase
+        .from('teams')
+        .update({
+          seed_position: position,
+          is_previous_winner: isWinner,
+          is_previous_runner_up: isRunnerUp,
+          is_previous_second_runner_up: isThird,
+        })
+        .eq('id', team.id);
+
+      if (error) throw error;
+
+      toast.success(position ? `Seed ${position} assigned!` : 'Seed cleared');
+      fetchTeams();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update seeding');
+    }
+  };
+
   const getSportName = (team: Team) => ((team as any).event_sport?.sport_category?.name || 'Unknown Sport');
 
   const filteredTeams = teams.filter((team) => {
@@ -258,7 +298,12 @@ export default function Teams() {
                             <p className="text-sm text-muted-foreground">{team.university?.short_name}</p>
                           </div>
                         </div>
-                        <StatusBadge status={team.status} />
+                        <div className="flex flex-col items-end gap-1">
+                          <StatusBadge status={team.status} />
+                          {team.seed_position === 1 && <span className="text-[10px] font-bold text-yellow-500 flex items-center gap-1 animate-pulse">🥇 Winner</span>}
+                          {team.seed_position === 2 && <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">🥈 Runner-up</span>}
+                          {team.seed_position === 3 && <span className="text-[10px] font-bold text-amber-700 flex items-center gap-1">🥉 2nd Runner-up</span>}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -268,6 +313,9 @@ export default function Teams() {
                         </div>
                         {(() => {
                           const src = (team as any).source as string | undefined;
+                          if (team.seed_position === 1) return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-600">🥇 Winner</span>;
+                          if (team.seed_position === 2) return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-400/15 text-slate-500">🥈 Runner-up</span>;
+                          if (team.seed_position === 3) return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-700/15 text-amber-800">🥉 2nd Runner-up</span>;
                           if (src === 'registered') return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-status-live/15 text-status-live">Registered</span>;
                           if (src === 'demo') return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">Demo</span>;
                           if (src === 'imported') return <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent/15 text-accent-foreground">Imported</span>;
@@ -275,25 +323,59 @@ export default function Teams() {
                         })()}
                       </div>
 
-                      <div className="flex items-center justify-between pt-3 border-t border-border">
-                        <Button variant="ghost" size="sm" onClick={() => handleViewTeam(team)}>
-                          <Eye className="h-4 w-4 mr-1" />
+                      <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-border">
+                        <Button variant="ghost" size="sm" onClick={() => handleViewTeam(team)} className="h-8">
+                          <Eye className="h-3.5 w-3.5 mr-1" />
                           View
                         </Button>
 
-                        {team.status === 'pending_approval' && isFaculty && (
-                          <Button size="sm" onClick={() => handleApproveTeam(team.id)}>
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Approve
-                          </Button>
+                        {isFaculty && (
+                          <div className="flex gap-1 ml-auto">
+                            <Button 
+                              variant={team.seed_position === 1 ? "default" : "outline"} 
+                              size="sm" 
+                              className="h-7 px-2 text-[10px]"
+                              onClick={() => handleSetSeed(team, team.seed_position === 1 ? null : 1)}
+                              title="Set as Winner (Seed 1)"
+                            >
+                              🥇
+                            </Button>
+                            <Button 
+                              variant={team.seed_position === 2 ? "default" : "outline"} 
+                              size="sm" 
+                              className="h-7 px-2 text-[10px]"
+                              onClick={() => handleSetSeed(team, team.seed_position === 2 ? null : 2)}
+                              title="Set as Runner-up (Seed 2)"
+                            >
+                              🥈
+                            </Button>
+                            <Button 
+                              variant={team.seed_position === 3 ? "default" : "outline"} 
+                              size="sm" 
+                              className="h-7 px-2 text-[10px]"
+                              onClick={() => handleSetSeed(team, team.seed_position === 3 ? null : 3)}
+                              title="Set as 2nd Runner-up (Seed 3)"
+                            >
+                              🥉
+                            </Button>
+                          </div>
                         )}
 
-                        {team.status === 'approved' && isFaculty && (
-                          <Button size="sm" variant="outline" onClick={() => handleLockTeam(team.id)}>
-                            <Lock className="h-4 w-4 mr-1" />
-                            Lock
-                          </Button>
-                        )}
+                        <div className="w-full flex justify-between gap-2 mt-1">
+                          {team.status === 'pending_approval' && isFaculty && (
+                            <Button size="sm" onClick={() => handleApproveTeam(team.id)} className="flex-1 h-8">
+                              <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                              Approve
+                            </Button>
+                          )}
+
+                          {team.status === 'approved' && isFaculty && (
+                            <Button size="sm" variant="outline" onClick={() => handleLockTeam(team.id)} className="flex-1 h-8">
+                              <Lock className="h-3.5 w-3.5 mr-1" />
+                              Lock
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
