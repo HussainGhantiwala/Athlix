@@ -33,6 +33,8 @@ type BracketMatch = Omit<Match, 'team_a' | 'team_b'> & {
   teamA?: { id: string; name: string };
   teamB?: { id: string; name: string };
   winner?: { id: string; name: string };
+  matchIndex?: number;
+  roundNumber?: number;
 };
 
 interface PositionedMatch {
@@ -89,7 +91,16 @@ export default function BracketView({ eventSportId }: { eventSportId: string }) 
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `event_sport_id=eq.${eventSportId}` },
-        () => void fetchBracket()
+        (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            const updatedMatch = payload.new as BracketMatch;
+            setMatches((current) =>
+              current.map((m) => (m.id === updatedMatch.id ? { ...m, ...updatedMatch } : m))
+            );
+          } else {
+            void fetchBracket();
+          }
+        }
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -132,14 +143,19 @@ export default function BracketView({ eventSportId }: { eventSportId: string }) 
   const { positionedMatches, connectors, rounds, totalWidth, totalHeight } = useMemo(() => {
     if (matches.length === 0) return { positionedMatches: [], connectors: [], rounds: [], totalWidth: 0, totalHeight: 0 };
 
-    const roundGroups = new Map<number, BracketMatch[]>();
-    matches.forEach(m => {
-      const rn = m.round_number || 1;
-      if (!roundGroups.has(rn)) roundGroups.set(rn, []);
-      roundGroups.get(rn)!.push(m);
+    const rounds: Record<number, BracketMatch[]> = {};
+    matches.forEach((match, index) => {
+      match.matchIndex = index;
+      const roundNumber = match.round_number || 1;
+      match.roundNumber = roundNumber;
+      
+      if (!rounds[roundNumber]) {
+        rounds[roundNumber] = [];
+      }
+      rounds[roundNumber].push(match);
     });
 
-    const sortedRoundNums = Array.from(roundGroups.keys()).sort((a, b) => a - b);
+    const sortedRoundNums = Object.keys(rounds).map(Number).sort((a, b) => a - b);
     const positioned: PositionedMatch[] = [];
     const idToPositioned = new Map<string, PositionedMatch>();
     const roundLabels: string[] = [];
@@ -147,11 +163,11 @@ export default function BracketView({ eventSportId }: { eventSportId: string }) 
     const baseSpacing = MATCH_HEIGHT + VERTICAL_SPACING;
 
     sortedRoundNums.forEach((roundNum, r) => {
-      const roundMatches = roundGroups.get(roundNum) || [];
-      
-      // Do NOT reorder matches randomly. We keep their existing deterministic array order 
-      // from the backend to ensure higher seeds are not misplaced.
-      
+      const roundMatches = rounds[roundNum];
+
+      // LOCK ORDER
+      roundMatches.sort((a, b) => (a.matchIndex ?? 0) - (b.matchIndex ?? 0));
+
       roundLabels.push(roundMatches[0]?.round || `Round ${r + 1}`);
 
       // Dynamic spacing: baseSpacing * (2 ^ roundIndex)
@@ -162,17 +178,17 @@ export default function BracketView({ eventSportId }: { eventSportId: string }) 
       roundMatches.forEach((m, i) => {
         // Find sources (parent matches from the previous round)
         const sources = positioned.filter(p => p.match.next_match_id === m.id);
-        
+
         let y: number;
 
         if (sources.length > 0) {
-           // Vertically center this match perfectly relative to its actual parent matches
-           const sumY = sources.reduce((sum, src) => sum + src.y, 0);
-           y = sumY / sources.length;
+          // Vertically center this match perfectly relative to its actual parent matches
+          const sumY = sources.reduce((sum, src) => sum + src.y, 0);
+          y = sumY / sources.length;
         } else {
-           // Round 1 matches (or disconnected trees) rely strictly on dynamic geometric spacing
-           // BYE matches take up a full index slot (i), refusing to collapse spacing.
-           y = startOffset + (i * currentSpacing);
+          // Round 1 matches (or disconnected trees) rely strictly on dynamic geometric spacing
+          // BYE matches take up a full index slot (i), refusing to collapse spacing.
+          y = startOffset + (i * currentSpacing);
         }
 
         const pm: PositionedMatch = {
@@ -222,9 +238,9 @@ export default function BracketView({ eventSportId }: { eventSportId: string }) 
       maxY = Math.max(...positioned.map(p => p.y));
     }
     const calculatedTotalHeight = (maxY - minY) + MATCH_HEIGHT + 100;
-    
+
     // Apply global Y offset to bring the entire bracket down by 50px
-    const offsetY = -minY + 50; 
+    const offsetY = -minY + 50;
 
     positioned.forEach(p => {
       p.y += offsetY;
